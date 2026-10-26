@@ -2960,6 +2960,20 @@ class CapsuleService : NotificationListenerService() {
                 elevation = dp(8).toFloat()
                 addView(iconView)
                 addView(pct)
+                // Give the secondary pill its own liquid-like entrance morph, independent of
+                // the main pill's expand/collapse animation.
+                if (motionEnabled()) {
+                    alpha = 0.72f
+                    scaleX = 0.82f
+                    scaleY = 0.82f
+                    post {
+                        animate().cancel()
+                        animate().alpha(1f).scaleX(1f).scaleY(1f)
+                            .setDuration(260)
+                            .setInterpolator(android.view.animation.OvershootInterpolator(0.8f))
+                            .start()
+                    }
+                }
                 setOnClickListener { openBatteryScreen() }
             }
             val window = FrameLayout(uiCtx).apply {
