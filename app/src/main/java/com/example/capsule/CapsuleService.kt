@@ -2998,7 +2998,7 @@ class CapsuleService : NotificationListenerService() {
         val musicOn = !hideAll && expanded && !callActive && !showingNotif && playing
         val miniMusic = !hideAll && !expanded && !callActive && !showingNotif && playing
         val swOn = stopwatchStart > 0
-        val chargeMini = !hideAll && !expanded && !callActive && !showingNotif && controller == null && charging && showCharging()
+        val chargeMini = !hideAll && !expanded && !callActive && !showingNotif && !mapsShown() && controller == null && charging && showCharging()
         val replyOn = !hideAll && expanded && !callActive && showingNotif && notifLevel >= 2 && replyAction != null &&
             prefs.getBoolean("replyChips", true)
         val actionOn = !hideAll && expanded && !callActive && showingNotif && notifLevel >= 2 && notifActions.isNotEmpty()
