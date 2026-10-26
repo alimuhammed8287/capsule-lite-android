@@ -129,11 +129,11 @@ class MainActivity : Activity() {
         })
         if (cat != null) button(col, "Back") { finish() }
         status = TextView(this).apply {
-            textSize = 14f
+            textSize = 13f
             setTextColor(0xFFE7EDF5.toInt())
-            setPadding(dp(2), dp(4), dp(2), dp(8))
+            setPadding(dp(8), dp(8), dp(8), dp(12))
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
-        if (cat == "setup") col.addView(status)
 
         when (cat) {
             null -> buildHome()
@@ -260,7 +260,8 @@ class MainActivity : Activity() {
     }
 
     private fun buildSetup() {
-        val diag = card("Diagnostics")
+        val diag = card("App status and diagnostics")
+        diag.addView(status)
         repairText = TextView(this).apply { textSize = 13f }
         diag.addView(repairText)
         diagText = TextView(this).apply {
