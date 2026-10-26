@@ -34,7 +34,17 @@ See [BUILD_TIMELINE.md](BUILD_TIMELINE.md) for version-by-version build outputs 
 2. Scroll to **Artifacts** and download `capsule-lite-v42-debug-apk`.
 3. Extract the ZIP and install `app-debug.apk`. Android may ask you to allow installation from the app used to open the file.
 
-The artifact expires on **November 9, 2026**. This is a debug APK, not a Play Store release.
+This is a debug APK, not a Play Store release. Artifact expiration is shown on the individual Actions run.
+
+## Build timeline
+
+| Build | Scope | Output |
+|---|---|---|
+| v1.3.2 / code 40 | Consolidated feature baseline; restore failure feedback | [Actions run](https://github.com/alimuhammed8287/capsule-lite-android/actions/runs/40319436164) · `capsule-lite-v40-debug-apk` |
+| v1.3.3 / code 41 | Initial settings redesign validation and card guidance | [Actions history](https://github.com/alimuhammed8287/capsule-lite-android/actions) |
+| v1.3.4 / code 42 | Settings redesign hero/navigation and section hierarchy; Maps pill default enabled for new installs; collapsed Maps pill prioritises total trip distance | [Current Actions runs](https://github.com/alimuhammed8287/capsule-lite-android/actions) · expected artifact `capsule-lite-v42-debug-apk` |
+
+The v1.3.4 artifact is considered ready only after its workflow completes successfully and the artifact is visible on that run. Build timestamps and artifact expiration are displayed by GitHub Actions.
 
 ## Build from source
 
