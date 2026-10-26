@@ -597,6 +597,13 @@ class MainActivity : Activity() {
 
     private fun buildTools() {
         val tools = card("Tools")
+        val backupNote = TextView(this).apply {
+            text = "Settings backups use a versioned JSON format. Older backups are supported; restore asks before changing your current settings."
+            textSize = 13f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(2), dp(2), dp(10))
+        }
+        tools.addView(backupNote)
         button(tools, "Open code generator") { startActivity(Intent(this, CodeActivity::class.java)) }
         button(tools, "Test pill (preview a music card)") {
             prefs.edit().putLong("testPill", System.currentTimeMillis()).apply()
