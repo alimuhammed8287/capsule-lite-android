@@ -40,17 +40,18 @@ class MainActivity : Activity() {
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         isAllCaps = false
         minHeight = dp(48)
+        stateListAnimator = null
         background = GradientDrawable(
             GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(0xFF26394A.toInt(), 0xFF17212E.toInt())
+            intArrayOf(0xFF203244.toInt(), 0xFF121C28.toInt())
         ).apply {
-            cornerRadius = dp(17).toFloat()
-            setStroke(dp(1), 0xFF426074.toInt())
+            cornerRadius = dp(16).toFloat()
+            setStroke(dp(1), 0x334DDDB0)
         }
         setPadding(dp(15), dp(11), dp(15), dp(11))
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(6) }
+        ).apply { topMargin = dp(7) }
     }
 
     private val titles = mapOf(
