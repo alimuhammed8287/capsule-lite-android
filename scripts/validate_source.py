@@ -52,6 +52,8 @@ checks = {
     "secondary pill has independent morph entrance": "OvershootInterpolator(0.8f)" in service and "animate().alpha(1f).scaleX(1f).scaleY(1f)" in service,
     "secondary pill has independent morph exit": "AccelerateInterpolator()" in service and "oldContent.animate()" in service and "scaleX(0.78f).scaleY(0.78f)" in service,
     "One UI-inspired home typography and cards": "textSize = 26f" in main and "cornerRadius = dp(24).toFloat()" in main,
+    "app theme choices include system light dark and AMOLED": all(name in main for name in ('"system", "light", "dark", "amoled"', "Follow system", "AMOLED black", "appThemeButton")),
+    "secondary charging pill expands independently": "chargePillExpanded" in service and "chargeEta" in service and "chargePillExpanded = !chargePillExpanded" in service,
     "service status only appears in diagnostics": 'if (cat == "setup") col.addView(status)' not in main and "diag.addView(status)" in main,
 }
 for label, ok in checks.items():
