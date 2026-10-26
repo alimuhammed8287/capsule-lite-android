@@ -2926,6 +2926,8 @@ class CapsuleService : NotificationListenerService() {
             (expanded && !chargeExpandedShown())
         val shouldFloat = showCharging() && prefs.getBoolean("separateChargePill", true) && charging && activeActivity
         if (!shouldFloat) {
+            // Do not carry expanded details into a later charging session or activity handoff.
+            chargePillExpanded = false
             val oldRoot = chargeRoot
             val oldContent = chargeWindow
             chargeRoot = null
