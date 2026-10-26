@@ -22,7 +22,7 @@ main = (ROOT / "app/src/main/java/com/example/capsule/MainActivity.kt").read_tex
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 checks = {
     "versionCode 42": bool(re.search(r"versionCode\s*=\s*42\b", build)),
-    "versionName 1.3.3": 'versionName = "1.3.4"' in build,
+    "versionName 1.3.4": 'versionName = "1.3.4"' in build,
     "adaptive ticker": "nextTickDelayMs()" in service,
     "screen-aware visualizer": "isInteractive" in service,
     "live activity classification": "fun classify(sbn: StatusBarNotification)" in policy,
@@ -33,11 +33,11 @@ checks = {
     "completion handoff": "finishLiveActivity" in service and "restoreNextLiveActivity" in service,
     "reduced motion setting": '"reduceMotion"' in main and '"reduceMotion"' in service,
     "CI builds debug APK": "assembleDebug" in workflow,
-    "CI artifact v41": "capsule-lite-v42-debug-apk" in workflow,
+    "CI artifact v42": "capsule-lite-v42-debug-apk" in workflow,
     "hybrid charging preference": 'getBoolean("separateChargePill", true)' in service,
     "charging handoff considers active activities": "callActive || showingNotif || mapsShown()" in service,
     "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
-    "collapsed Maps pill prioritises trip distance left": "private fun mapsMiniText(): String = MapsNav.distanceLeft.ifEmpty { MapsNav.turnDistance }" in service,
+    "collapsed Maps pill keeps next-turn distance in leading text": "private fun mapsMiniText(): String = MapsNav.turnDistance.ifEmpty { MapsNav.distanceLeft.ifEmpty { MapsNav.eta.ifEmpty { \"Maps\" } } }" in service,
     "Maps navigation pill enabled by default": 'toggle(shown, "Navigation info in the pill (reads Maps\' navigation notification, and the Maps screen while it is open)", "mapsInfo", true)' in main and 'getBoolean("mapsInfo", true)' in service and 'getBoolean("mapsInfo", false)' not in service,
     "secondary charging pill screen clamp": "screenH - dp(54)" in service and "secondaryChargeY()" in service,
     "settings switches have readable touch targets": "minHeight = dp(52)" in main and "setTextColor(primaryTextColor())" in main,
