@@ -617,8 +617,15 @@ class MainActivity : Activity() {
         saveMsg = TextView(this).apply { textSize = 13f; setTextColor(primaryTextColor()) }
         tools.addView(saveMsg)
         button(tools, "Reset to defaults") {
-            prefs.edit().clear().apply()
-            recreate()
+            AlertDialog.Builder(this)
+                .setTitle("Reset all settings?")
+                .setMessage("This clears your saved Capsule Lite preferences on this phone. Export your settings first if you may want them later.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Reset") { _, _ ->
+                    prefs.edit().clear().apply()
+                    recreate()
+                }
+                .show()
         }
     }
 
