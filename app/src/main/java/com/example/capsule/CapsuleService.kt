@@ -1764,7 +1764,7 @@ class CapsuleService : NotificationListenerService() {
                 springH.value = springH.target
                 springW.velocity = 0f
                 springH.velocity = 0f
-                (pill?.background as? GradientDrawable)?.cornerRadius = minOf((lp.height - 2 * pad) / 2f, dp(40).toFloat())
+                (pill?.background as? GradientDrawable)?.cornerRadius = minOf((lp.height - 2 * pad) / 2f, dp(if (expanded) 28 else 40).toFloat())
                 runCatching { wm.updateViewLayout(r, lp) }
                 syncPanelY()
                 springRunning = false
