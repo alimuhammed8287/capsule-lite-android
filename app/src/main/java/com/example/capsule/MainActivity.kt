@@ -547,8 +547,16 @@ class MainActivity : Activity() {
     private fun toggle(parent: LinearLayout, label: String, key: String, default: Boolean) {
         parent.addView(Switch(this).apply {
             text = label
+            textSize = 14f
+            setTextColor(0xFFE7EDF5.toInt())
+            minHeight = dp(52)
+            setPadding(dp(2), dp(8), dp(2), dp(8))
             isChecked = prefs.getBoolean(key, default)
             setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean(key, on).apply() }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(3) }
         })
     }
 
