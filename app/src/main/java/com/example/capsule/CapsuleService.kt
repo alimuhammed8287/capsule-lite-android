@@ -81,21 +81,6 @@ class CapsuleService : NotificationListenerService() {
 
     private var root: View? = null          // transparent window view (includes the tap margin)
     private var pill: LinearLayout? = null  // the black pill inside it
-    // Charging moves into its own small overlay only while another activity owns the main pill.
-    private var chargeRoot: View? = null
-    private var chargeWindow: LinearLayout? = null
-    private var chargeWindowLp: WindowManager.LayoutParams? = null
-    private var chargeWindowIcon: View? = null
-    private var chargeWindowText: TextView? = null
-    private var chargePillExpanded = false
-    private var chargeLastExpandedState = false
-    // Independent damped springs drive the secondary pill surface; retargeting preserves velocity.
-    private val chargeSpringW = Spring()
-    private val chargeSpringH = Spring()
-    private var chargeSpringRunning = false
-    private var chargeSpringLast = 0L
-    private var chargeSurfaceShape: GradientDrawable? = null
-
     private lateinit var miniText: TextView
     private lateinit var miniRight: TextView          // collapsed charging pill: the percentage, right of the camera hole
     private lateinit var miniSpacer: View
@@ -514,19 +499,6 @@ class CapsuleService : NotificationListenerService() {
         controller?.unregisterCallback(controllerCallback)
         controller = null
         runCatching { msm?.removeOnActiveSessionsChangedListener(sessionsListener) }
-        chargeRoot?.let { v ->
-            v.animate().cancel()
-            chargeWindow?.animate()?.cancel()
-            chargeWindowIcon?.animate()?.cancel()
-            chargeWindowText?.animate()?.cancel()
-            runCatching { wm.removeView(v) }
-        }
-        chargeRoot = null
-        chargeWindow = null
-        chargeWindowLp = null
-        chargeWindowIcon = null
-        chargeWindowText = null
-        chargeSurfaceShape = null
         root?.let { v -> runCatching { wm.removeView(v) } }
         root = null
         pill = null
@@ -1827,105 +1799,6 @@ class CapsuleService : NotificationListenerService() {
         }
     }
 
-    // The secondary charging pill uses the same damped-spring model as the main pill.
-    // Width and height retain their current velocities when the target changes mid-flight.
-    private val chargeSpringFrame = object : android.view.Choreographer.FrameCallback {
-        override fun doFrame(frameTimeNanos: Long) {
-            val windowRoot = chargeRoot
-            val wlp = chargeWindowLp
-            if (windowRoot == null || wlp == null || !windowRoot.isAttachedToWindow) {
-                chargeSpringRunning = false
-                chargeSpringLast = 0L
-                return
-            }
-            if (!motionEnabled()) {
-                wlp.width = chargeSpringW.target.toInt()
-                wlp.height = chargeSpringH.target.toInt()
-                chargeSpringW.value = chargeSpringW.target
-                chargeSpringH.value = chargeSpringH.target
-                chargeSpringW.velocity = 0f
-                chargeSpringH.velocity = 0f
-                updateChargeSurfaceFrame(windowRoot, wlp)
-                chargeSpringRunning = false
-                chargeSpringLast = 0L
-                return
-            }
-            val dt = if (chargeSpringLast == 0L) 1f / 60f
-                else ((frameTimeNanos - chargeSpringLast) / 1_000_000_000f).coerceIn(0f, 0.05f)
-            chargeSpringLast = frameTimeNanos
-            val speed = prefs.getString("springSpeed", "medium") ?: "medium"
-            val response = when (speed) {
-                "fast" -> 0.31f
-                "slow" -> 0.60f
-                else -> 0.42f
-            }
-            chargeSpringW.step(dt, response, 0.82f)
-            chargeSpringH.step(dt, response + 0.08f, 0.88f)
-            val done = chargeSpringW.settled(0.6f) && chargeSpringH.settled(0.6f)
-            if (done) {
-                chargeSpringW.value = chargeSpringW.target
-                chargeSpringH.value = chargeSpringH.target
-                chargeSpringW.velocity = 0f
-                chargeSpringH.velocity = 0f
-            }
-            wlp.width = chargeSpringW.value.toInt().coerceAtLeast(dp(76))
-            wlp.height = chargeSpringH.value.toInt().coerceAtLeast(dp(34))
-            updateChargeSurfaceFrame(windowRoot, wlp)
-            if (done) {
-                chargeSpringRunning = false
-                chargeSpringLast = 0L
-            } else {
-                android.view.Choreographer.getInstance().postFrameCallback(this)
-            }
-        }
-    }
-
-    private fun updateChargeSurfaceFrame(windowRoot: View, wlp: WindowManager.LayoutParams) {
-        wlp.x = secondaryChargeX(wlp.width)
-        chargeSurfaceShape?.cornerRadius = if (chargePillExpanded) dp(18).toFloat()
-            else minOf(wlp.height / 2f, dp(22).toFloat())
-        runCatching {
-            if (windowRoot.isAttachedToWindow) wm.updateViewLayout(windowRoot, wlp)
-        }
-    }
-
-    private fun stopChargeSpring() {
-        android.view.Choreographer.getInstance().removeFrameCallback(chargeSpringFrame)
-        chargeSpringRunning = false
-        chargeSpringLast = 0L
-    }
-
-    private fun animateChargeWindowSize(targetWidth: Int, targetHeight: Int) {
-        val windowRoot = chargeRoot ?: return
-        val wlp = chargeWindowLp ?: return
-        if (!motionEnabled()) {
-            stopChargeSpring()
-            wlp.width = targetWidth
-            wlp.height = targetHeight
-            chargeSpringW.value = targetWidth.toFloat()
-            chargeSpringW.target = targetWidth.toFloat()
-            chargeSpringW.velocity = 0f
-            chargeSpringH.value = targetHeight.toFloat()
-            chargeSpringH.target = targetHeight.toFloat()
-            chargeSpringH.velocity = 0f
-            updateChargeSurfaceFrame(windowRoot, wlp)
-            return
-        }
-        if (!chargeSpringRunning) {
-            chargeSpringW.value = wlp.width.toFloat()
-            chargeSpringH.value = wlp.height.toFloat()
-            chargeSpringW.velocity = 0f
-            chargeSpringH.velocity = 0f
-        }
-        chargeSpringW.target = targetWidth.toFloat()
-        chargeSpringH.target = targetHeight.toFloat()
-        if (!chargeSpringRunning) {
-            chargeSpringRunning = true
-            chargeSpringLast = 0L
-            android.view.Choreographer.getInstance().postFrameCallback(chargeSpringFrame)
-        }
-    }
-
     private fun stopSpring() {
         android.view.Choreographer.getInstance().removeFrameCallback(springFrame)
         springRunning = false
@@ -2331,7 +2204,7 @@ class CapsuleService : NotificationListenerService() {
             outline.strokeWidth = stroke
             val inset = stroke * 1.8f
             inner.set(left + inset, top + inset, left + bw - inset, top + bh - inset)
-            val shape = selectedShape().coerceIn(0, 4)
+            val shape = selectedShape().coerceIn(0, 7)
             if (shape == 0) {
                 canvas.drawRoundRect(body, unit * 0.13f, unit * 0.13f, outline)
                 val terminal = android.graphics.RectF(left + bw * 0.32f, top - unit * 0.10f, left + bw * 0.68f, top + unit * 0.015f)
@@ -2358,19 +2231,47 @@ class CapsuleService : NotificationListenerService() {
                         p.quadTo(cx+unit*.25f,cy+unit*.20f,cx-unit*.25f,cy+unit*.25f); p.close()
                         p.moveTo(cx-unit*.18f,cy+unit*.18f); p.lineTo(cx+unit*.16f,cy-unit*.15f)
                     }
-                    else -> { // Spark
+                    4 -> { // Spark
                         p.moveTo(cx,cy-unit*.36f); p.lineTo(cx+unit*.09f,cy-unit*.08f)
                         p.lineTo(cx+unit*.34f,cy); p.lineTo(cx+unit*.09f,cy+unit*.08f)
                         p.lineTo(cx,cy+unit*.36f); p.lineTo(cx-unit*.09f,cy+unit*.08f)
                         p.lineTo(cx-unit*.34f,cy); p.lineTo(cx-unit*.09f,cy-unit*.08f); p.close()
                     }
+                    5 -> { // Pixel battery: squared shoulders and a distinct top terminal
+                        p.moveTo(cx-unit*.20f,cy-unit*.27f); p.lineTo(cx+unit*.20f,cy-unit*.27f)
+                        p.lineTo(cx+unit*.20f,cy-unit*.19f); p.lineTo(cx+unit*.28f,cy-unit*.19f)
+                        p.lineTo(cx+unit*.28f,cy+unit*.24f); p.lineTo(cx+unit*.20f,cy+unit*.24f)
+                        p.lineTo(cx+unit*.20f,cy+unit*.31f); p.lineTo(cx-unit*.20f,cy+unit*.31f)
+                        p.lineTo(cx-unit*.20f,cy+unit*.24f); p.lineTo(cx-unit*.28f,cy+unit*.24f)
+                        p.lineTo(cx-unit*.28f,cy-unit*.19f); p.lineTo(cx-unit*.20f,cy-unit*.19f); p.close()
+                    }
+                    6, 7 -> Unit // Draw the standalone glyph and ring after the fill animation.
                 }
-                if (shape == 2 || shape == 3) canvas.drawPath(p, outline) else canvas.drawPath(p, fill)
+                if (shape == 2 || shape == 3 || shape == 5) canvas.drawPath(p, outline)
+                else if (shape != 6 && shape != 7) canvas.drawPath(p, fill)
             }
             val style = selectedStyle().coerceIn(0, 2)
             val wave = (0.5 + 0.5 * kotlin.math.sin(phase * Math.PI * 6.0)).toFloat()
-            canvas.save()
-            canvas.clipRect(inner)
+            if (shape == 6) {
+                val dotRadius = unit * 0.055f
+                val litCount = ((phase * 9f).toInt() % 9) + 1
+                for (row in 0..2) for (col in 0..2) {
+                    fill.alpha = if (row * 3 + col < litCount) 255 else 64
+                    canvas.drawCircle(w / 2f + (col - 1) * unit * 0.19f,
+                        h / 2f + (row - 1) * unit * 0.19f, dotRadius, fill)
+                }
+                fill.alpha = 255
+            } else if (shape == 7) {
+                val radius = unit * 0.30f
+                outline.strokeWidth = maxOf(2f, unit * 0.075f)
+                canvas.drawCircle(w / 2f, h / 2f, radius, outline)
+                fill.style = android.graphics.Paint.Style.STROKE
+                fill.strokeWidth = outline.strokeWidth
+                fill.strokeCap = android.graphics.Paint.Cap.ROUND
+                canvas.drawArc(w/2f-radius, h/2f-radius, w/2f+radius, h/2f+radius,
+                    -90f, 360f * phase, false, fill)
+                fill.style = android.graphics.Paint.Style.FILL
+            } else {
             when (style) {
                 0 -> {
                     // Smooth liquid fill.
@@ -2399,7 +2300,8 @@ class CapsuleService : NotificationListenerService() {
                     fill.alpha = 255
                 }
             }
-            canvas.restore()
+
+            }
             val u = unit * 0.22f
             val boltScale = if (style == 2) 0.78f + 0.32f * wave else 1f
             canvas.save()
@@ -3031,253 +2933,8 @@ class CapsuleService : NotificationListenerService() {
 
     private fun vis(on: Boolean) = if (on) View.VISIBLE else View.GONE
 
-    // If another live activity needs the main pill, move charging into a secondary pill.
-    // When the main pill is otherwise idle, remove the secondary window and show charging in-place.
-    private fun updateSeparateChargingPill() {
-        // A detailed activity owns the main pill; short-lived/idle states keep charging integrated.
-        val activeActivity = callActive || showingNotif || mapsShown() ||
-            (controller != null && showMusic()) || qsActive() || widgetActive() ||
-            (expanded && !chargeExpandedShown())
-        // Only float the pill while Android reports an active charging state. A plugged/full
-        // battery is not an active charging session and must not leave a stale mini-pill.
-        val shouldFloat = showCharging() && prefs.getBoolean("separateChargePill", true) &&
-            charging && activeActivity
-        if (!shouldFloat) {
-            // Do not carry expanded details into a later charging session or activity handoff.
-            chargePillExpanded = false
-            stopChargeSpring()
-            chargeSurfaceShape = null
-            val oldRoot = chargeRoot
-            val oldContent = chargeWindow
-            chargeRoot = null
-            chargeWindow = null
-            chargeWindowLp = null
-            chargeWindowIcon = null
-            chargeWindowText = null
-            if (oldRoot != null && oldContent != null && motionEnabled()) {
-                oldContent.animate().cancel()
-                oldContent.animate()
-                    .alpha(0f).scaleX(0.78f).scaleY(0.78f)
-                    .setDuration(150)
-                    .setInterpolator(android.view.animation.AccelerateInterpolator())
-                    .withEndAction {
-                        runCatching { if (oldRoot.isAttachedToWindow) wm.removeView(oldRoot) }
-                    }
-                    .start()
-            } else {
-                oldRoot?.let { v -> runCatching { wm.removeView(v) } }
-            }
-            return
-        }
-        if (chargeRoot == null) {
-            val pad = dp(4)
-            val iconView = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 0) }).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(22), dp(22))
-            }
-            val pct = TextView(uiCtx).apply {
-                text = "$chargePct%"
-                textSize = 12f
-                setTextColor(Color.WHITE)
-                setTypeface(typeface, Typeface.BOLD)
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(7), 0, dp(10), 0)
-            }
-            val content = LinearLayout(uiCtx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8), dp(5), dp(5), dp(5))
-                background = GradientDrawable(
-                    GradientDrawable.Orientation.TL_BR,
-                    intArrayOf(0xF0263444.toInt(), 0xF0121924.toInt())
-                ).apply {
-                    cornerRadius = dp(22).toFloat()
-                    setStroke(dp(1), 0x6657DDB0)
-                }.also { chargeSurfaceShape = it }
-                clipToOutline = true
-                clipChildren = true
-                elevation = dp(8).toFloat()
-                addView(iconView)
-                addView(pct)
-                // Give the secondary pill its own liquid-like entrance morph, independent of
-                // the main pill's expand/collapse animation.
-                if (motionEnabled()) {
-                    alpha = 0.72f
-                    scaleX = 0.82f
-                    scaleY = 0.82f
-                    post {
-                        animate().cancel()
-                        animate().alpha(1f).scaleX(1f).scaleY(1f)
-                            .setDuration(260)
-                            .setInterpolator(android.view.animation.OvershootInterpolator(0.8f))
-                            .start()
-                    }
-                }
-                isClickable = true
-                val chargeGestureDetector = GestureDetector(uiCtx, object : GestureDetector.SimpleOnGestureListener() {
-                    override fun onDown(e: MotionEvent): Boolean = true
-                    override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                        val start = e1 ?: return false
-                        val dx = e2.x - start.x
-                        val dy = e2.y - start.y
-                        if (kotlin.math.abs(dy) > dp(28) && kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.15f) {
-                            if (dy > 0 && !chargePillExpanded) setChargePillExpanded(true)
-                            else if (dy < 0 && chargePillExpanded) setChargePillExpanded(false)
-                            return true
-                        }
-                        return false
-                    }
-                    override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                        performChargePillGesture("chargePillTap", "toggle")
-                        return true
-                    }
-                    override fun onDoubleTap(e: MotionEvent): Boolean {
-                        performChargePillGesture("chargePillDoubleTap", "none")
-                        return true
-                    }
-                    override fun onLongPress(e: MotionEvent) {
-                        performChargePillGesture("chargePillLongPress", "none")
-                    }
-                })
-                setOnTouchListener { _, event ->
-                    chargeGestureDetector.onTouchEvent(event)
-                    true
-                }
-            }
-            val window = FrameLayout(uiCtx).apply {
-                setPadding(pad, pad, pad, pad)
-                addView(content, FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.CENTER
-                ))
-            }
-            val chargeWidth = dp(prefs.getInt("chargeMiniW", 100).coerceIn(76, 150))
-            val chargeHeight = dp(prefs.getInt("chargeMiniH", 42).coerceIn(34, 64))
-            val wlp = WindowManager.LayoutParams(
-                chargeWidth, chargeHeight,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT
-            ).apply {
-                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                x = secondaryChargeX(chargeWidth)
-                y = secondaryChargeY()
-                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-            }
-            chargeRoot = window
-            chargeWindow = content
-            chargeWindowLp = wlp
-            chargeWindowIcon = iconView
-            chargeWindowText = pct
-            runCatching { wm.addView(window, wlp) }.onFailure {
-                diag("charging pill: could not attach secondary overlay: ${it.javaClass.simpleName}")
-                chargeRoot = null
-                chargeWindow = null
-                chargeWindowLp = null
-            }
-        }
-        // Keep the same icon view anchored as the surface grows; only scale it for expanded detail.
-        chargeWindowIcon?.animate()?.cancel()
-        chargeWindowIcon?.animate()
-            ?.scaleX(if (chargePillExpanded) 1.28f else 1f)
-            ?.scaleY(if (chargePillExpanded) 1.28f else 1f)
-            ?.setDuration(if (motionEnabled()) 260L else 0L)
-            ?.setInterpolator(android.view.animation.OvershootInterpolator(0.35f))
-            ?.start()
-        chargeWindowText?.apply {
-            text = if (chargePillExpanded) {
-                "$chargePct%  ·  $chargeEta\n" + lastTempC.toInt() + "°C  ·  " + (chargeWatts?.let { "%.1fW".format(it) } ?: "— W")
-            } else "$chargePct%"
-            textSize = if (chargePillExpanded) 10.5f else 12f
-            maxLines = if (chargePillExpanded) 2 else 1
-            layoutParams = LinearLayout.LayoutParams(
-                if (chargePillExpanded) 0 else LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                if (chargePillExpanded) 1f else 0f
-            ).apply { if (chargePillExpanded) marginStart = dp(6) }
-        }
-        chargeWindow?.layoutParams = FrameLayout.LayoutParams(
-            if (chargePillExpanded) FrameLayout.LayoutParams.MATCH_PARENT else FrameLayout.LayoutParams.WRAP_CONTENT,
-            if (chargePillExpanded) FrameLayout.LayoutParams.MATCH_PARENT else FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.CENTER
-        )
-        chargeWindowLp?.let { wlp ->
-            val baseWidth = dp(prefs.getInt("chargeMiniW", 100).coerceIn(76, 150))
-            val baseHeight = dp(prefs.getInt("chargeMiniH", 42).coerceIn(34, 64))
-            val targetWidth = if (chargePillExpanded) (baseWidth + dp(76)).coerceAtMost(resources.displayMetrics.widthPixels - dp(16)) else baseWidth
-            val targetHeight = if (chargePillExpanded) baseHeight + dp(18) else baseHeight
-            wlp.x = secondaryChargeX(targetWidth)
-            wlp.y = secondaryChargeY()
-            animateChargeWindowSize(targetWidth, targetHeight)
-            chargeLastExpandedState = chargePillExpanded
-        }
-    }
-
-    private fun setChargePillExpanded(value: Boolean) {
-        if (chargePillExpanded == value) return
-        val detailText = chargeWindowText
-        if (motionEnabled() && detailText != null) {
-            // Fade old content out first, keep the battery icon/surface in place, then reveal new details.
-            detailText.animate().cancel()
-            detailText.animate().alpha(0f).setDuration(80L).withEndAction {
-                chargePillExpanded = value
-                chargeLastExpandedState = value
-                updateSeparateChargingPill()
-                detailText.animate().alpha(1f).setDuration(150L).start()
-            }.start()
-        } else {
-            chargePillExpanded = value
-            chargeLastExpandedState = value
-            updateSeparateChargingPill()
-            detailText?.alpha = 1f
-        }
-        chargeWindow?.let { content ->
-            content.animate().cancel()
-            if (motionEnabled()) {
-                content.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                    .setDuration(220L)
-                    .setInterpolator(android.view.animation.OvershootInterpolator(0.45f))
-                    .start()
-            } else {
-                content.alpha = 1f
-                content.scaleX = 1f
-                content.scaleY = 1f
-            }
-        }
-    }
-
-    private fun performChargePillGesture(key: String, defaultAction: String) {
-        when (prefs.getString(key, defaultAction) ?: defaultAction) {
-            "battery" -> openBatteryScreen()
-            "toggle" -> setChargePillExpanded(!chargePillExpanded)
-            else -> Unit
-        }
-    }
-
-    // Center-horizontal overlay offsets are relative to screen center. Place the charge pill
-    // beside the right edge of the main compact pill, not underneath it.
-    private fun secondaryChargeX(chargeWidth: Int): Int {
-        val screenW = resources.displayMetrics.widthPixels
-        val desired = resolvedOffX + dp(prefs.getInt("miniW", 100).coerceIn(40, 200)) / 2 +
-            dp(8) + chargeWidth / 2
-        val maxOffset = (screenW - chargeWidth) / 2
-        return desired.coerceIn(-maxOffset, maxOffset)
-    }
-
-    private fun secondaryChargeY(): Int {
-        val mainHeight = if (expanded) targetInnerH() else miniH
-        val offset = dp(prefs.getInt("chargeMiniYOffset", 0).coerceIn(-80, 120))
-        val desired = resolvedTopY + mainHeight / 2 + offset
-        val screenH = resources.displayMetrics.heightPixels
-        return desired.coerceIn(dp(8), (screenH - dp(54)).coerceAtLeast(dp(8)))
-    }
-
     private fun applyVisibility() {
         if (pill == null) return
-        updateSeparateChargingPill()
         val qsOn = qsActive()
         val inner = targetInnerH()
         val mapsWide = !expanded && (mapsShown() || callCompact())
