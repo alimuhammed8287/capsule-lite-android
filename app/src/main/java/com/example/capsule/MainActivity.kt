@@ -608,7 +608,7 @@ class MainActivity : Activity() {
 
         val motion = card("Motion")
         motionPresetButton(motion)
-        toggle(motion, "Enable liquid morph animation", "springMotion", true)
+        pillAnimationStyleButton(motion)
         toggle(motion, "Reduce motion (short, non-staggered transitions)", "reduceMotion", false)
 
         val blur = card("Frosted glass")
@@ -982,6 +982,49 @@ class MainActivity : Activity() {
                 .show()
         }
         parent.addView(button)
+    }
+
+    private fun pillAnimationStyleButton(parent: LinearLayout) {
+        val styles = listOf("liquid_morph", "continuity", "settling_dock")
+        val labels = mapOf(
+            "liquid_morph" to "Liquid morph",
+            "continuity" to "Icon continuity",
+            "settling_dock" to "Settling dock"
+        )
+        val descriptions = arrayOf(
+            "Liquid morph — elastic width and height movement",
+            "Icon continuity — carry the charging icon between sizes",
+            "Settling dock — calm expansion with details unfolding below"
+        )
+        fun selected() = (prefs.getString("pillAnimationStyle", "continuity") ?: "continuity")
+            .takeIf { it in styles } ?: "continuity"
+        fun label(style: String) = "Pill animation: ${labels[style] ?: labels["continuity"]}"
+        val button = styledButton().apply {
+            text = label(selected())
+            contentDescription = "Choose pill animation style"
+        }
+        button.setOnClickListener {
+            val current = selected()
+            AlertDialog.Builder(this)
+                .setTitle("Pill animation style")
+                .setSingleChoiceItems(descriptions, styles.indexOf(current).coerceAtLeast(0)) { dialog, which ->
+                    val next = styles[which]
+                    prefs.edit().putString("pillAnimationStyle", next)
+                        .putBoolean("springMotion", true)
+                        .apply()
+                    button.text = label(next)
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        parent.addView(button)
+        parent.addView(TextView(this).apply {
+            text = "Switch between elastic morphing, shared icon continuity, and a calmer unfolding motion."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(4), dp(2), dp(8))
+        })
     }
 
     private fun vizStyleButton(parent: LinearLayout) {
