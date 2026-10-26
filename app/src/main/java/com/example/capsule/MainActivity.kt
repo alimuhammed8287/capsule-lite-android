@@ -137,7 +137,7 @@ class MainActivity : Activity() {
                     letterSpacing = -0.035f
                 })
                 addView(TextView(this@MainActivity).apply {
-                    text = if (cat == null) "FLOATING COMPANION  ·  V1.3" else "PERSONALISE YOUR EXPERIENCE"
+                    text = if (cat == null) "FLOATING COMPANION  ·  V1.3.3" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
                     textSize = 10f
                     letterSpacing = 0.08f
                     setTextColor(secondaryTextColor())
@@ -636,31 +636,87 @@ class MainActivity : Activity() {
         }
     }
 
-    // A rounded section with an accent title; controls are added inside it
+    // Section descriptions and card hierarchy keep the settings screen readable at a glance.
+    private fun sectionDescription(title: String): String = when (title) {
+        "App status and diagnostics" -> "Service health, recent events, and troubleshooting details."
+        "Permissions" -> "Grant only the access needed for the features you want to use."
+        "Show in the pill" -> "Choose which live events can appear in the floating pill."
+        "Gestures (tap a row to change it)" -> "Tap an action row to cycle through its available behavior."
+        "Size and position" -> "Tune the pill footprint and placement for your display."
+        "Music player" -> "Choose how playback information and visual effects are shown."
+        "Auto expand" -> "Control when the pill opens automatically for new events."
+        "Which notifications show" -> "Filter notification types and supported live activities."
+        "Heights" -> "Adjust expanded layouts for different event types."
+        "Control panel" -> "Choose how the quick-control panel opens and behaves."
+        "Tiles in the control panel (switch off to remove a tile)" -> "Keep only the shortcuts you use."
+        "Pinned apps and quick replies" -> "Personalize app shortcuts and supported reply suggestions."
+        "Charging" -> "Configure charging status, alerts, and the separate charging pill."
+        "Separate pill gestures" -> "Set independent actions for the secondary charging pill."
+        "App theme" -> "Choose the appearance of the Capsule Lite settings screens."
+        "Pill appearance" -> "Customize the floating pill's style, color, and typography."
+        "Motion" -> "Balance smooth transitions with reduced-motion preferences."
+        "Frosted glass" -> "Use a translucent layered look with a safe fallback on unsupported devices."
+        "Custom image widget" -> "Choose an optional image to show in the pill."
+        "History and hidden apps" -> "Manage local notification history and apps to keep out of view."
+        "Tools" -> "Back up settings, restore a configuration, and run utilities."
+        else -> "Adjust how this part of Capsule Lite behaves."
+    }
+
+    // Rounded settings section with a clear title, short purpose, and divider before its controls.
     private fun card(title: String): LinearLayout {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                surfaceColors()
+                if (isLightAppTheme()) intArrayOf(0xFFFFFFFF.toInt(), 0xFFF4F7FB.toInt())
+                else if (appTheme() == "amoled") intArrayOf(Color.BLACK, 0xFF050505.toInt())
+                else intArrayOf(0xFF1B2938.toInt(), 0xFF121B26.toInt())
             ).apply {
-                cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), if (isLightAppTheme()) 0xFFD7E0E9.toInt() else 0xFF2B3B4B.toInt())
+                cornerRadius = dp(22).toFloat()
+                setStroke(dp(1), if (isLightAppTheme()) 0xFFD6E0EA.toInt() else if (appTheme() == "amoled") 0xFF292929.toInt() else 0xFF2C4052.toInt())
             }
-            elevation = dp(2).toFloat()
-            setPadding(dp(16), dp(15), dp(16), dp(16))
+            elevation = if (appTheme() == "amoled") 0f else dp(1).toFloat()
+            setPadding(dp(17), dp(16), dp(17), dp(17))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(14) }
+            ).apply { topMargin = dp(12) }
         }
+        box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = "●"
+                textSize = 10f
+                setTextColor(if (isLightAppTheme()) 0xFF138A78.toInt() else 0xFF76DDF4.toInt())
+                gravity = android.view.Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(dp(22), dp(24))
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 15.5f
+                letterSpacing = -0.015f
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                setTextColor(primaryTextColor())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+        })
         box.addView(TextView(this).apply {
-            text = title.uppercase()
-            textSize = 11f
-            letterSpacing = 0.09f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setTextColor(if (isLightAppTheme()) 0xFF187D70.toInt() else 0xFF76DDF4.toInt())
-            setPadding(0, 0, 0, dp(8))
+            text = sectionDescription(title)
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setPadding(dp(22), dp(3), dp(2), dp(11))
+        })
+        box.addView(TextView(this).apply {
+            text = " "
+            background = GradientDrawable().apply {
+                setColor(if (isLightAppTheme()) 0xFFE2E8F0.toInt() else if (appTheme() == "amoled") 0xFF242424.toInt() else 0xFF304254.toInt())
+                cornerRadius = dp(1).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                bottomMargin = dp(7)
+            }
         })
         col.addView(box)
         return box
