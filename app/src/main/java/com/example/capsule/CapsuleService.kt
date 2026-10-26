@@ -248,6 +248,7 @@ class CapsuleService : NotificationListenerService() {
         }
         uiPost {
             if (root == null) return@uiPost
+            cancelChargeIconFlight()
             root?.let { v -> runCatching { wm.removeView(v) } }
             root = null
             pill = null
@@ -1617,14 +1618,16 @@ class CapsuleService : NotificationListenerService() {
             applyVisibility()
             return
         }
-        val flight = prepareChargeIconFlight(e)
+        val style = pillAnimationStyle()
+        val flight = style == "continuity" && motionEnabled() && prepareChargeIconFlight(e)
         if (flight && e) chargeBox.alpha = 0f
-        snapshotOld()
+        if (style != "settling_dock") snapshotOld() else clearSnapshot()
         expanded = e
         applyVisibility()
         staggerIn()
         animateSize()
         if (flight) startChargeIconFlight(e)
+        if (style == "settling_dock") animateSettlingChargeIcon(e)
     }
 
     private fun prepareChargeIconFlight(expanding: Boolean): Boolean {
@@ -1754,7 +1757,11 @@ class CapsuleService : NotificationListenerService() {
         }
     }
 
-    // Respect both the app's motion toggle and Android's system-wide animator setting.
+    private fun pillAnimationStyle(): String =
+        (prefs.getString("pillAnimationStyle", "continuity") ?: "continuity")
+            .takeIf { it in setOf("liquid_morph", "continuity", "settling_dock") } ?: "continuity"
+
+    // Respect the legacy animation switch, reduced motion, and Android's system animator setting.
     // ValueAnimator.areAnimatorsEnabled() is available from API 26; this app supports API 24+.
     private fun motionEnabled(): Boolean {
         if (!prefs.getBoolean("springMotion", true) || prefs.getBoolean("reduceMotion", false)) return false
@@ -1763,6 +1770,10 @@ class CapsuleService : NotificationListenerService() {
 
     // Each visible part of the pill grows in from slightly small and blurry, one after another
     private fun staggerIn() {
+        if (pillAnimationStyle() == "settling_dock") {
+            settlingDockEntrance()
+            return
+        }
         val items = listOf(
             miniText, miniRight, icon, textCol, chargeBox, navBox,
             btnPrev, btnPlay, btnNext, barsRow, btnAnswer, btnDecline
@@ -1812,6 +1823,63 @@ class CapsuleService : NotificationListenerService() {
                 .start()
             blurIn(v, delay)
         }
+    }
+
+    private fun settlingDockEntrance() {
+        val items = listOf(
+            miniText, miniRight, icon, textCol, chargeBox, navBox,
+            btnPrev, btnPlay, btnNext, barsRow, btnAnswer, btnDecline
+        ) + chips
+        if (!motionEnabled()) {
+            items.forEach { view ->
+                view.animate().cancel()
+                view.alpha = 1f
+                view.translationY = 0f
+                view.scaleX = 1f
+                view.scaleY = 1f
+            }
+            return
+        }
+        items.forEach { view ->
+            view.animate().cancel()
+            if (view.visibility != View.VISIBLE) {
+                view.alpha = 1f
+                view.translationY = 0f
+                return@forEach
+            }
+            view.alpha = 0f
+            view.translationY = dp(7).toFloat()
+            view.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(240)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.3f))
+                .start()
+        }
+    }
+
+    private fun animateSettlingChargeIcon(expanding: Boolean) {
+        val target = if (expanding) chargeRing else miniChargeRing
+        val other = if (expanding) miniChargeRing else chargeRing
+        other.animate().cancel()
+        other.scaleX = 1f
+        other.scaleY = 1f
+        if (target.visibility != View.VISIBLE) return
+        if (!motionEnabled()) {
+            target.scaleX = 1f
+            target.scaleY = 1f
+            return
+        }
+        val initialScale = if (expanding) 0.62f else 1.55f
+        target.animate().cancel()
+        target.scaleX = initialScale
+        target.scaleY = initialScale
+        target.animate()
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(240)
+            .setInterpolator(android.view.animation.DecelerateInterpolator(1.3f))
+            .start()
     }
 
     // Expanded height depends on what the pill is showing: grid, music, notification or call, or charging
@@ -1908,13 +1976,17 @@ class CapsuleService : NotificationListenerService() {
             springLast = frameTimeNanos
             // Width leads height to create a liquid stretch. Presets tune response time without changing the shape.
             val speed = prefs.getString("springSpeed", "medium") ?: "medium"
-            val (widthResponse, heightResponse) = when (speed) {
-                "fast" -> 0.31f to 0.38f
-                "slow" -> 0.60f to 0.70f
-                else -> 0.42f to 0.50f
+            val (widthResponse, heightResponse, damping) = if (pillAnimationStyle() == "settling_dock") {
+                Triple(0.52f, 0.58f, 0.96f)
+            } else {
+                when (speed) {
+                    "fast" -> Triple(0.31f, 0.38f, 0.84f)
+                    "slow" -> Triple(0.60f, 0.70f, 0.84f)
+                    else -> Triple(0.42f, 0.50f, 0.84f)
+                }
             }
-            springW.step(dt, widthResponse, 0.82f)
-            springH.step(dt, heightResponse, 0.88f)
+            springW.step(dt, widthResponse, damping)
+            springH.step(dt, heightResponse, damping)
             val done = springW.settled(0.6f) && springH.settled(0.6f)
             if (done) {
                 springW.value = springW.target
@@ -2015,6 +2087,10 @@ class CapsuleService : NotificationListenerService() {
     // A picture of what the pill shows now (without its black background). The old content blurs, shrinks
     // and fades out on top of the pill while the new content comes in underneath.
     private fun snapshotOld() {
+        if (pillAnimationStyle() == "settling_dock") {
+            clearSnapshot()
+            return
+        }
         if (chargeFlightPending) return
         if (android.os.Build.VERSION.SDK_INT < 31) return
         if (!motionEnabled()) {
