@@ -38,4 +38,45 @@ GitHub Actions runs `scripts/validate_source.py`, checks Android XML, compiles `
 
 ## Test plan and limitations
 
-Use [MANUAL_TEST_PLAN.md](MANUAL_TEST_PLAN.md) to test the installed app. CI validation and compilation do not replace testing on a physical phone. Verify overlay permissions, notification access, battery/charging state, calls, Maps, media, notification actions/replies, gestures, theme contrast, accessibility, settings backup/restore, and service recovery on your device.
+Use the checklist below to test the installed app. CI validation and compilation do not replace testing on a physical phone.
+
+## Manual device test checklist
+
+### Permissions and first launch
+- [ ] Confirm the app opens. Review overlay, notification access, and Android 13+ notification permission behavior.
+- [ ] Check diagnostics for clear missing-permission status.
+
+### Themes and accessibility
+- [ ] Switch System, Light, Dark, and AMOLED themes; inspect headings, buttons, switches, hints, text fields, status messages, and tile arrows.
+- [ ] Verify pill appearance is independent from the app theme.
+- [ ] If using TalkBack, test home tile descriptions and slider value announcements.
+- [ ] Test global animation and reduced-motion settings.
+
+### Charging pill and gestures
+- [ ] Test charging visibility, width, height, vertical offset, icon styles, and icon shapes.
+- [ ] Test tap, double-tap, and long-press independently.
+- [ ] Expand/collapse the pill and check percentage, ETA, temperature, and watts when available.
+- [ ] Unplug the charger; confirm the secondary pill disappears.
+- [ ] Test charging while notifications, media, calls, and Maps are active.
+
+### Notifications and live activities
+- [ ] Test ordinary notifications, supported action buttons, and quick replies.
+- [ ] Test calls and media controls.
+- [ ] Try timer/stopwatch and progress notifications from apps that publish supported ongoing notifications.
+- [ ] Verify timer priority, completion display, and handoff to the next eligible activity.
+- [ ] Test live-activity allow-list, hidden-app list, and driving mode.
+
+### Settings and backup
+- [ ] Save custom lists and confirm success feedback.
+- [ ] Export settings; cancel a restore and verify nothing changes.
+- [ ] Restore a backup and confirm matching settings are applied while absent keys remain unchanged.
+- [ ] If available, test an older backup without version metadata.
+- [ ] Test reset cancellation; only confirm reset when intentionally clearing preferences.
+- [ ] Keep a backup before testing malformed or oversized JSON files.
+
+### Background behavior and bug reports
+- [ ] Switch apps, lock/unlock, and test background behavior.
+- [ ] Check that hiding the secondary pill does not leave an invisible touch overlay.
+- [ ] For a bug, record exact steps, expected versus actual behavior, phone model, Android version, and whether it reproduces consistently.
+
+**Reminder:** CI success confirms static checks and APK compilation; it does not confirm all behavior on a physical device.
