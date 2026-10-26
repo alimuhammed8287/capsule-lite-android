@@ -534,55 +534,19 @@ class MainActivity : Activity() {
 
     private fun buildCharging() {
         val charge = card("Charging")
-        toggle(charge, "Show charging status", "showCharging", true)
-        toggle(charge, "Move charging into a separate pill while notifications, Maps, music or calls are active", "separateChargePill", true)
+        toggle(charge, "Show charging status in the main pill", "showCharging", true)
         toggle(charge, "Charging alerts (when the charge reaches a level, or is full)", "chargeAlert", true)
         slider(charge, "Alert at charge (%)", "chargeAlertAt", 50, 100, 80)
         slider(charge, "Height: charging", "expH_charge", 40, 120, 64)
-        slider(charge, "Separate pill width", "chargeMiniW", 76, 150, 100)
-        slider(charge, "Separate pill height", "chargeMiniH", 34, 64, 42)
-        slider(charge, "Separate pill vertical offset", "chargeMiniYOffset", -80, 120, 0)
         chargingStyleButton(charge)
         chargingIconButton(charge)
-
-        val gestures = card("Separate pill gestures")
         TextView(this).apply {
-            text = "Choose actions for the charging pill independently from the main pill."
+            text = "Choose from eight animated designs, including One UI-inspired, Pixel-inspired, and glyph-dot styles. The same selection appears in compact and expanded charging views."
             textSize = 12f
             setTextColor(secondaryTextColor())
-            setPadding(dp(2), dp(2), dp(2), dp(6))
-        }.also { gestures.addView(it) }
-        TextView(this).apply {
-            text = "Tip: swipe down on the separate charging pill to expand it, then swipe up to collapse it. The battery icon stays anchored while the details crossfade."
-            textSize = 12f
-            setTextColor(secondaryTextColor())
-            setPadding(dp(2), dp(2), dp(2), dp(8))
-        }.also { gestures.addView(it) }
-        chargeGestureButton(gestures, "chargePillTap", "Single tap")
-        chargeGestureButton(gestures, "chargePillDoubleTap", "Double tap")
-        chargeGestureButton(gestures, "chargePillLongPress", "Long press")
-    }
+            setPadding(dp(2), dp(4), dp(2), dp(6))
+        }.also { charge.addView(it) }
 
-    private fun chargeGestureButton(parent: LinearLayout, key: String, label: String) {
-        val actions = listOf("battery" to "Open battery screen", "toggle" to "Expand/collapse charging pill", "none" to "Do nothing")
-        fun current() = (prefs.getString(key, if (key == "chargePillTap") "toggle" else "none") ?: "none")
-            .let { value -> actions.indexOfFirst { it.first == value }.coerceAtLeast(0) }
-        val b = styledButton().apply {
-            text = "$label: " + actions[current()].second
-            contentDescription = "Configure separate charging pill $label"
-        }
-        b.setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle(label + " action")
-                .setSingleChoiceItems(actions.map { it.second }.toTypedArray(), current()) { dialog, which ->
-                    prefs.edit().putString(key, actions[which].first).apply()
-                    b.text = "$label: " + actions[which].second
-                    dialog.dismiss()
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
-        parent.addView(b)
     }
 
     private fun chargingStyleButton(parent: LinearLayout) {
@@ -607,18 +571,18 @@ class MainActivity : Activity() {
     }
 
     private fun chargingIconButton(parent: LinearLayout) {
-        val icons = listOf("Battery", "Lightning bolt", "Power plug", "Leaf", "Spark")
+        val icons = listOf("One UI battery", "Lightning bolt", "Power plug", "Leaf", "Spark", "Pixel battery", "Nothing glyph dots", "Pixel charge ring")
         fun selected() = prefs.getInt("chargeIconShape", 0).coerceIn(0, icons.lastIndex)
         val b = styledButton().apply {
-            text = "Charging symbol: " + icons[selected()]
-            contentDescription = "Choose charging symbol shape"
+            text = "Charging icon: " + icons[selected()]
+            contentDescription = "Choose charging icon design"
         }
         b.setOnClickListener {
             AlertDialog.Builder(this)
-                .setTitle("Charging symbol")
+                .setTitle("Charging icon")
                 .setSingleChoiceItems(icons.toTypedArray(), selected()) { dialog, which ->
                     prefs.edit().putInt("chargeIconShape", which).apply()
-                    b.text = "Charging symbol: " + icons[which]
+                    b.text = "Charging icon: " + icons[which]
                     dialog.dismiss()
                 }
                 .setNegativeButton("Cancel", null)
@@ -741,8 +705,7 @@ class MainActivity : Activity() {
         "Control panel" -> "Choose how the quick-control panel opens and behaves."
         "Tiles in the control panel (switch off to remove a tile)" -> "Keep only the shortcuts you use."
         "Pinned apps and quick replies" -> "Personalize app shortcuts and supported reply suggestions."
-        "Charging" -> "Configure charging status, alerts, and the separate charging pill."
-        "Separate pill gestures" -> "Set independent actions for the secondary charging pill."
+        "Charging" -> "Configure charging status, alerts, and the main pill battery icon."
         "App theme" -> "Choose the appearance of the Capsule Lite settings screens."
         "Pill appearance" -> "Customize the floating pill's style, color, and typography."
         "Motion" -> "Balance smooth transitions with reduced-motion preferences."
