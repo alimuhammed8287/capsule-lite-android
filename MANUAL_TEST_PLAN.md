@@ -1,4 +1,4 @@
-# Capsule Lite v44 — combined regression and release test plan
+# Capsule Lite v45 — charging pill bug-fix and regression test plan
 
 Run after the v44 debug APK builds successfully. Record pass/fail and device/OS version for each section.
 
