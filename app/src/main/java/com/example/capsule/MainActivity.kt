@@ -365,10 +365,9 @@ class MainActivity : Activity() {
         toggle(motion, "Reduce motion (short, non-staggered transitions)", "reduceMotion", false)
 
         val blur = card("Frosted glass")
-        toggle(blur, "Enable real background blur when Android supports it", "blur", false)
-        slider(blur, "Blur strength", "blurRadius", 10, 100, 40)
+        toggle(blur, "Frosted translucent glass (safe mode)", "blur", false)
         blur.addView(TextView(this).apply {
-            text = "Android controls whether cross-window blur is available. When unavailable, Capsule keeps a readable tinted-glass surface. Some devices blur the screen behind the floating window, not only inside its rounded shape."
+            text = "Uses a layered, translucent pill surface without blurring the rest of your screen. True background blur clipped exactly to the pill is not enabled because some Xiaomi/HyperOS versions blur outside the pill shape."
             textSize = 12f
             setTextColor(0xFF9DA6B5.toInt())
             setPadding(dp(2), dp(6), dp(2), dp(2))
