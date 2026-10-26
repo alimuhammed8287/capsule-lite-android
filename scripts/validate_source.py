@@ -69,6 +69,7 @@ checks = {
     "settings backups include compatible version metadata": 'json.put("_capsuleLiteBackupVersion", 1)' in main and 'json.put("_capsuleLiteExportedAt", System.currentTimeMillis())' in main and 'if (backupVersion != 1) error("unsupported backup version: $backupVersion")' in main and 'k == "_capsuleLiteBackupVersion" || k == "_capsuleLiteExportedAt"' in main,
     "tools explain backup compatibility and restore confirmation": "Settings backups use a versioned JSON format." in main and "Older backups are supported; restore asks before changing your current settings." in main,
     "restoring settings requires explicit confirmation": 'setTitle("Restore settings?")' in main and 'setPositiveButton("Restore")' in main and 'setNegativeButton("Cancel", null)' in main and 'Settings restored from the file.' in main,
+    "restore confirmation explains merge behavior": "Settings in this file will overwrite matching Capsule Lite choices." in main and "Settings not included in the file will remain unchanged." in main,
     "app theme choices include system light dark and AMOLED": all(name in main for name in ('"system", "light", "dark", "amoled"', "Follow system", "AMOLED black", "appThemeButton")),
     "secondary charging pill expands independently": "chargePillExpanded" in service and "chargeEta" in service and "chargePillExpanded = !chargePillExpanded" in service,
     "secondary charging pill resets expansion when hidden": "if (!shouldFloat) {" in service and "chargePillExpanded = false" in service,
