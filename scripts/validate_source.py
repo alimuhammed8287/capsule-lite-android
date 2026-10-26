@@ -40,6 +40,12 @@ checks = {
     "secondary charging pill screen clamp": "screenH - dp(54)" in service and "secondaryChargeY()" in service,
     "settings switches have readable touch targets": "minHeight = dp(52)" in main and "setTextColor(0xFFE7EDF5.toInt())" in main,
     "frosted glass avoids whole-window blur": "flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND" not in service and "translucent, bordered surface" in service,
+    "charging pill is positioned beside the main pill": "private fun secondaryChargeX(chargeWidth: Int)" in service and "dp(8) + chargeWidth / 2" in service,
+    "charging pill has independent width and height": 'getInt("chargeMiniW", 100)' in service and 'getInt("chargeMiniH", 42)' in service,
+    "charging pill has independent vertical offset": 'getInt("chargeMiniYOffset", 0)' in service,
+    "charging icon supports distinct symbols": 'getInt("chargeIconShape", 0)' in service and "Lightning bolt" in main and "Power plug" in main,
+    "secondary pill has independent morph entrance": "OvershootInterpolator(0.8f)" in service and "animate().alpha(1f).scaleX(1f).scaleY(1f)" in service,
+    "service status only appears in diagnostics": 'if (cat == "setup") col.addView(status)' in main,
 }
 for label, ok in checks.items():
     print(f"{'PASS' if ok else 'FAIL'}: {label}")
