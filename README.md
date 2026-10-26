@@ -31,7 +31,7 @@ See [BUILD_TIMELINE.md](BUILD_TIMELINE.md) for version-by-version build outputs 
 ## Download the APK
 
 1. Open the [latest successful v40 GitHub Actions run](https://github.com/alimuhammed8287/capsule-lite-android/actions/runs/40326572203).
-2. Scroll to **Artifacts** and download `capsule-lite-v40-debug-apk`.
+2. Scroll to **Artifacts** and download `capsule-lite-v42-debug-apk`.
 3. Extract the ZIP and install `app-debug.apk`. Android may ask you to allow installation from the app used to open the file.
 
 The artifact expires on **November 9, 2026**. This is a debug APK, not a Play Store release.
@@ -89,3 +89,10 @@ Use the checklist below to test the installed app. CI validation and compilation
 - [ ] For a bug, record exact steps, expected versus actual behavior, phone model, Android version, and whether it reproduces consistently.
 
 **Reminder:** CI success confirms static checks and APK compilation; it does not confirm all behavior on a physical device.
+
+
+## Build timeline
+
+- **v1.3.2 / v40:** consolidated feature build and settings backup/restore feedback.
+- **v1.3.3 / v41:** settings UI redesign and category guidance.
+- **v1.3.4 / v42:** Maps collapsed-pill route distance and navigation default behavior. Follow [GitHub Actions](https://github.com/alimuhammed8287/capsule-lite-android/actions) for the current build and artifact.
