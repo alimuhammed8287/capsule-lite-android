@@ -2974,7 +2974,25 @@ class CapsuleService : NotificationListenerService() {
                             .start()
                     }
                 }
-                setOnClickListener { openBatteryScreen() }
+                isClickable = true
+                val chargeGestureDetector = GestureDetector(uiCtx, object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDown(e: MotionEvent): Boolean = true
+                    override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                        performChargePillGesture("chargePillTap", "battery")
+                        return true
+                    }
+                    override fun onDoubleTap(e: MotionEvent): Boolean {
+                        performChargePillGesture("chargePillDoubleTap", "none")
+                        return true
+                    }
+                    override fun onLongPress(e: MotionEvent) {
+                        performChargePillGesture("chargePillLongPress", "none")
+                    }
+                })
+                setOnTouchListener { _, event ->
+                    chargeGestureDetector.onTouchEvent(event)
+                    true
+                }
             }
             val window = FrameLayout(uiCtx).apply {
                 setPadding(pad, pad, pad, pad)
@@ -3018,6 +3036,14 @@ class CapsuleService : NotificationListenerService() {
             wlp.x = secondaryChargeX(wlp.width)
             wlp.y = secondaryChargeY()
             chargeRoot?.let { v -> runCatching { wm.updateViewLayout(v, wlp) } }
+        }
+    }
+
+    private fun performChargePillGesture(key: String, defaultAction: String) {
+        when (prefs.getString(key, defaultAction) ?: defaultAction) {
+            "battery" -> openBatteryScreen()
+            "toggle" -> setExpanded(!expanded)
+            else -> Unit
         }
     }
 
