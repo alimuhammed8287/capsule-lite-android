@@ -32,6 +32,27 @@ class MainActivity : Activity() {
     private val accent by lazy { getColor(android.R.color.system_accent1_200) }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun appTheme() = (prefs.getString("appTheme", "dark") ?: "dark").takeIf { it in listOf("system", "light", "dark", "amoled") } ?: "dark"
+    private fun isLightAppTheme() = when (appTheme()) {
+        "light" -> true
+        "system" -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_NO
+        else -> false
+    }
+    private fun screenColors(): IntArray = when (appTheme()) {
+        "light" -> intArrayOf(0xFFF4F6F9.toInt(), 0xFFEAF0F5.toInt(), 0xFFF8FAFC.toInt())
+        "amoled" -> intArrayOf(Color.BLACK, Color.BLACK, 0xFF050505.toInt())
+        "system" -> if (isLightAppTheme()) intArrayOf(0xFFF4F6F9.toInt(), 0xFFEAF0F5.toInt(), 0xFFF8FAFC.toInt()) else intArrayOf(0xFF0A111B.toInt(), 0xFF101824.toInt(), 0xFF090B10.toInt())
+        else -> intArrayOf(0xFF0A111B.toInt(), 0xFF101824.toInt(), 0xFF090B10.toInt())
+    }
+    private fun surfaceColors(): IntArray = when (appTheme()) {
+        "light" -> intArrayOf(Color.WHITE, 0xFFF7F9FC.toInt())
+        "amoled" -> intArrayOf(Color.BLACK, 0xFF050505.toInt())
+        "system" -> if (isLightAppTheme()) intArrayOf(Color.WHITE, 0xFFF7F9FC.toInt()) else intArrayOf(0xFF192431.toInt(), 0xFF121A24.toInt())
+        else -> intArrayOf(0xFF192431.toInt(), 0xFF121A24.toInt())
+    }
+    private fun primaryTextColor() = if (isLightAppTheme()) 0xFF17202B.toInt() else 0xFFE7EDF5.toInt()
+    private fun secondaryTextColor() = if (isLightAppTheme()) 0xFF5D6B7B.toInt() else 0xFF9AAABD.toInt()
+
 
     // Rounded, translucent buttons used across the settings screen
     private fun styledButton() = Button(this).apply {
@@ -150,7 +171,7 @@ class MainActivity : Activity() {
 
         setContentView(ScrollView(this).apply {
             isFillViewport = true
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF0A111B.toInt(), 0xFF101824.toInt(), 0xFF090B10.toInt()))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, screenColors())
             addView(col)
         })
     }
@@ -208,10 +229,10 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(13), dp(12), dp(13))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF1A2430.toInt(), 0xFF121A24.toInt())
+                surfaceColors()
             ).apply {
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), 0xFF2A3948.toInt())
+                setStroke(dp(1), if (isLightAppTheme()) 0xFFD7E0E9.toInt() else 0xFF2A3948.toInt())
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -240,13 +261,13 @@ class MainActivity : Activity() {
             addView(TextView(this@MainActivity).apply {
                 text = title
                 textSize = 15.5f
-                setTextColor(Color.WHITE)
+                setTextColor(primaryTextColor())
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             })
             addView(TextView(this@MainActivity).apply {
                 text = subtitle
                 textSize = 11.5f
-                setTextColor(0xFF9AAABD.toInt())
+                setTextColor(secondaryTextColor())
                 setPadding(0, dp(3), 0, 0)
             })
         })
@@ -580,10 +601,10 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF192431.toInt(), 0xFF121A24.toInt())
+                surfaceColors()
             ).apply {
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), 0xFF2B3B4B.toInt())
+                setStroke(dp(1), if (isLightAppTheme()) 0xFFD7E0E9.toInt() else 0xFF2B3B4B.toInt())
             }
             elevation = dp(2).toFloat()
             setPadding(dp(16), dp(15), dp(16), dp(16))
