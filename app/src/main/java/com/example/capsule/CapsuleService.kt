@@ -2202,15 +2202,44 @@ class CapsuleService : NotificationListenerService() {
             canvas.drawRoundRect(terminal, unit * 0.04f, unit * 0.04f, fill)
             val inset = stroke * 1.8f
             inner.set(left + inset, top + inset, left + bw - inset, top + bh - inset)
+            val style = (phase * 3f).toInt().coerceIn(0, 2)
+            val wave = (0.5 + 0.5 * kotlin.math.sin(phase * Math.PI * 6.0)).toFloat()
             canvas.save()
             canvas.clipRect(inner)
-            val level = 0.28f + 0.62f * (0.5f + 0.5f * kotlin.math.sin(phase * Math.PI * 2.0)).toFloat()
-            val fillTop = inner.bottom - inner.height() * level
-            canvas.drawRoundRect(inner.left, fillTop, inner.right, inner.bottom, unit * 0.07f, unit * 0.07f, fill)
+            when (style) {
+                0 -> {
+                    // Smooth liquid fill.
+                    val level = 0.28f + 0.62f * wave
+                    val fillTop = inner.bottom - inner.height() * level
+                    canvas.drawRoundRect(inner.left, fillTop, inner.right, inner.bottom, unit * 0.07f, unit * 0.07f, fill)
+                }
+                1 -> {
+                    // Three clear charge segments light up in sequence.
+                    val gap = maxOf(1f, unit * 0.035f)
+                    val segmentH = (inner.height() - gap * 2f) / 3f
+                    for (i in 0..2) {
+                        val segment = android.graphics.RectF(
+                            inner.left, inner.bottom - (i + 1) * segmentH - i * gap,
+                            inner.right, inner.bottom - i * (segmentH + gap)
+                        )
+                        if (i <= ((phase * 9f).toInt() % 4)) {
+                            canvas.drawRoundRect(segment, unit * 0.04f, unit * 0.04f, fill)
+                        }
+                    }
+                }
+                else -> {
+                    // Gentle pulse mode: a steady base and a breathing bolt.
+                    fill.alpha = (95 + 100 * wave).toInt().coerceIn(0, 255)
+                    canvas.drawRoundRect(inner, unit * 0.07f, unit * 0.07f, fill)
+                    fill.alpha = 255
+                }
+            }
             canvas.restore()
             val u = unit * 0.22f
+            val boltScale = if (style == 2) 0.78f + 0.32f * wave else 1f
             canvas.save()
             canvas.translate(w / 2f, h / 2f)
+            canvas.scale(boltScale, boltScale)
             boltPath.reset()
             boltPath.moveTo(u * 0.18f, -u)
             boltPath.lineTo(-u * 0.55f, u * 0.12f)
