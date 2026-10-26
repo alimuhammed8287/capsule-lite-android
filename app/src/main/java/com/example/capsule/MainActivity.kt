@@ -565,7 +565,7 @@ class MainActivity : Activity() {
 
     private fun chargeGestureButton(parent: LinearLayout, key: String, label: String) {
         val actions = listOf("battery" to "Open battery screen", "toggle" to "Expand/collapse charging pill", "none" to "Do nothing")
-        fun current() = (prefs.getString(key, if (key == "chargePillTap") "battery" else "none") ?: "none")
+        fun current() = (prefs.getString(key, if (key == "chargePillTap") "toggle" else "none") ?: "none")
             .let { value -> actions.indexOfFirst { it.first == value }.coerceAtLeast(0) }
         val b = styledButton().apply {
             text = "$label: " + actions[current()].second
