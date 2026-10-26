@@ -2881,6 +2881,7 @@ class CapsuleService : NotificationListenerService() {
     // If another live activity needs the main pill, move charging into a secondary pill.
     // When the main pill is otherwise idle, remove the secondary window and show charging in-place.
     private fun updateSeparateChargingPill() {
+        // A detailed activity owns the main pill; short-lived/idle states keep charging integrated.
         val activeActivity = callActive || showingNotif || mapsShown() ||
             (controller != null && showMusic()) || qsActive() || widgetActive() ||
             (expanded && !chargeExpandedShown())
@@ -2941,7 +2942,7 @@ class CapsuleService : NotificationListenerService() {
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 x = offX
-                y = topY + miniH + dp(8)
+                y = secondaryChargeY()
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             }
             chargeRoot = window
@@ -2959,9 +2960,16 @@ class CapsuleService : NotificationListenerService() {
         chargeWindowText?.text = "$chargePct%"
         chargeWindowLp?.let { wlp ->
             wlp.x = offX
-            wlp.y = topY + miniH + dp(8)
+            wlp.y = secondaryChargeY()
             chargeRoot?.let { v -> runCatching { wm.updateViewLayout(v, wlp) } }
         }
+    }
+
+    private fun secondaryChargeY(): Int {
+        val mainHeight = if (expanded) targetInnerH() else miniH
+        val desired = topY + mainHeight + dp(12)
+        val screenH = resources.displayMetrics.heightPixels
+        return desired.coerceAtMost((screenH - dp(54)).coerceAtLeast(dp(8)))
     }
 
     private fun applyVisibility() {
