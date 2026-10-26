@@ -2272,7 +2272,9 @@ class CapsuleService : NotificationListenerService() {
                     -90f, 360f * phase, false, fill)
                 fill.style = android.graphics.Paint.Style.FILL
             } else {
-            when (style) {
+                canvas.save()
+                canvas.clipRect(inner)
+                when (style) {
                 0 -> {
                     // Smooth liquid fill.
                     val level = 0.28f + 0.62f * wave
@@ -2299,24 +2301,26 @@ class CapsuleService : NotificationListenerService() {
                     canvas.drawRoundRect(inner, unit * 0.07f, unit * 0.07f, fill)
                     fill.alpha = 255
                 }
+                }
+                canvas.restore()
             }
-
+            if (shape != 6) {
+                val u = unit * 0.22f
+                val boltScale = if (style == 2) 0.78f + 0.32f * wave else 1f
+                canvas.save()
+                canvas.translate(w / 2f, h / 2f)
+                canvas.scale(boltScale, boltScale)
+                boltPath.reset()
+                boltPath.moveTo(u * 0.18f, -u)
+                boltPath.lineTo(-u * 0.55f, u * 0.12f)
+                boltPath.lineTo(-u * 0.05f, u * 0.12f)
+                boltPath.lineTo(-u * 0.18f, u)
+                boltPath.lineTo(u * 0.58f, -u * 0.16f)
+                boltPath.lineTo(u * 0.08f, -u * 0.16f)
+                boltPath.close()
+                canvas.drawPath(boltPath, bolt)
+                canvas.restore()
             }
-            val u = unit * 0.22f
-            val boltScale = if (style == 2) 0.78f + 0.32f * wave else 1f
-            canvas.save()
-            canvas.translate(w / 2f, h / 2f)
-            canvas.scale(boltScale, boltScale)
-            boltPath.reset()
-            boltPath.moveTo(u * 0.18f, -u)
-            boltPath.lineTo(-u * 0.55f, u * 0.12f)
-            boltPath.lineTo(-u * 0.05f, u * 0.12f)
-            boltPath.lineTo(-u * 0.18f, u)
-            boltPath.lineTo(u * 0.58f, -u * 0.16f)
-            boltPath.lineTo(u * 0.08f, -u * 0.16f)
-            boltPath.close()
-            canvas.drawPath(boltPath, bolt)
-            canvas.restore()
         }
     }
 
