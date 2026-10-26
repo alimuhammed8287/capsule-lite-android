@@ -79,19 +79,52 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(28), dp(18), dp(28))
         }
-        col.addView(TextView(this).apply {
-            text = if (cat == null) "Capsule Lite" else titles[cat] ?: "Settings"
-            textSize = 27f
-            setTextColor(Color.WHITE)
-            setTypeface(Typeface.create("sans-serif", Typeface.BOLD))
-            letterSpacing = -0.02f
-            setPadding(0, 0, 0, dp(5))
-        })
-        col.addView(TextView(this).apply {
-            text = if (cat == null) "Your floating companion" else "Personalise how Capsule looks and behaves"
-            textSize = 13f
-            setTextColor(0xFF9DA6B5.toInt())
-            setPadding(0, 0, 0, dp(10))
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(14), dp(10))
+            background = GradientDrawable().apply {
+                setColor(0xFF172332.toInt())
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1), 0x334EDDB0)
+            }
+            addView(TextView(this@MainActivity).apply {
+                text = "C"
+                textSize = 21f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(0xFF08130F.toInt())
+                setTypeface(Typeface.create("sans-serif", Typeface.BOLD))
+                background = GradientDrawable().apply {
+                    setColor(0xFF6CE5B2.toInt())
+                    cornerRadius = dp(12).toFloat()
+                }
+                layoutParams = LinearLayout.LayoutParams(dp(42), dp(42))
+            })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = dp(12)
+                }
+                addView(TextView(this@MainActivity).apply {
+                    text = if (cat == null) "Capsule Lite" else titles[cat] ?: "Settings"
+                    textSize = 22f
+                    setTextColor(Color.WHITE)
+                    setTypeface(Typeface.create("sans-serif", Typeface.BOLD))
+                    letterSpacing = -0.02f
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = if (cat == null) "FLOATING COMPANION  ·  V1.3" else "PERSONALISE YOUR EXPERIENCE"
+                    textSize = 10f
+                    letterSpacing = 0.08f
+                    setTextColor(0xFF91A2B7.toInt())
+                    setPadding(0, dp(3), 0, 0)
+                })
+            })
+        }.apply { 
+            setPadding(dp(12), dp(10), dp(14), dp(10))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(14)
+            }
         })
         if (cat != null) button(col, "Back") { finish() }
         status = TextView(this).apply { textSize = 14f }
