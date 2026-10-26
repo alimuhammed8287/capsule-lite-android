@@ -20,10 +20,13 @@ This log tracks source changes separately from their CI output. A build is consi
 - The category header identifies the settings context and v1.3.3.
 - Existing settings controls and stored preference keys are retained; this change is intended as a presentation redesign, not a settings behavior rewrite.
 
+| 2026-10-26 | v1.3.7 / v45 | Charging pill tap-to-expand default, active-charging-only visibility, touch-window adjustment, retained full-charge alert, charging regression checklist | CI pending; device validation pending |
+
 ## Current validation state
 
 - v43 CI passed and `capsule-lite-v43-debug-apk` was uploaded; physical-device test of charging-pill motion and swipe gestures remains pending.
-- v44 CI verification and physical-device regression tests remain pending.
+- v44 CI passed and `capsule-lite-v44-debug-apk` was uploaded; charging-pill defects were reported during device testing.
+- v45 contains fixes for tap-to-expand, active-charging-only visibility, and overlay touch handling. CI and physical-device regression tests are pending.
 - The animation uses the existing main-pill physics spring and a spring-like overshoot resize on the secondary pill; this is not yet a full shared-element/container-transform implementation across every notification type.
 
 ## Build output record template
