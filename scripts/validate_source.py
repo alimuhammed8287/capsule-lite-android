@@ -50,6 +50,8 @@ checks = {
     "charging pill has independent vertical offset": 'getInt("chargeMiniYOffset", 0)' in service,
     "charging icon supports distinct symbols": 'getInt("chargeIconShape", 0)' in service and "Lightning bolt" in main and "Power plug" in main,
     "secondary pill has independent morph entrance": "OvershootInterpolator(0.8f)" in service and "animate().alpha(1f).scaleX(1f).scaleY(1f)" in service,
+    "secondary pill has independent morph exit": "AccelerateInterpolator()" in service and "oldContent.animate()" in service and "scaleX(0.78f).scaleY(0.78f)" in service,
+    "One UI-inspired home typography and cards": "textSize = 26f" in main and "cornerRadius = dp(24).toFloat()" in main,
     "service status only appears in diagnostics": 'if (cat == "setup") col.addView(status)' not in main and "diag.addView(status)" in main,
 }
 for label, ok in checks.items():
