@@ -88,6 +88,8 @@ class CapsuleService : NotificationListenerService() {
     private var chargeWindowIcon: View? = null
     private var chargeWindowText: TextView? = null
     private var chargePillExpanded = false
+    private var chargeResizeAnimator: ValueAnimator? = null
+    private var chargeLastExpandedState = false
 
     private lateinit var miniText: TextView
     private lateinit var miniRight: TextView          // collapsed charging pill: the percentage, right of the camera hole
@@ -2994,6 +2996,17 @@ class CapsuleService : NotificationListenerService() {
                 isClickable = true
                 val chargeGestureDetector = GestureDetector(uiCtx, object : GestureDetector.SimpleOnGestureListener() {
                     override fun onDown(e: MotionEvent): Boolean = true
+                    override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                        val start = e1 ?: return false
+                        val dx = e2.x - start.x
+                        val dy = e2.y - start.y
+                        if (kotlin.math.abs(dy) > dp(28) && kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.15f) {
+                            if (dy > 0 && !chargePillExpanded) setChargePillExpanded(true)
+                            else if (dy < 0 && chargePillExpanded) setChargePillExpanded(false)
+                            return true
+                        }
+                        return false
+                    }
                     override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                         performChargePillGesture("chargePillTap", "battery")
                         return true
@@ -3066,37 +3079,68 @@ class CapsuleService : NotificationListenerService() {
         chargeWindowLp?.let { wlp ->
             val baseWidth = dp(prefs.getInt("chargeMiniW", 100).coerceIn(76, 150))
             val baseHeight = dp(prefs.getInt("chargeMiniH", 42).coerceIn(34, 64))
-            wlp.width = if (chargePillExpanded) (baseWidth + dp(76)).coerceAtMost(resources.displayMetrics.widthPixels - dp(16)) else baseWidth
-            wlp.height = if (chargePillExpanded) baseHeight + dp(18) else baseHeight
-            wlp.x = secondaryChargeX(wlp.width)
+            val targetWidth = if (chargePillExpanded) (baseWidth + dp(76)).coerceAtMost(resources.displayMetrics.widthPixels - dp(16)) else baseWidth
+            val targetHeight = if (chargePillExpanded) baseHeight + dp(18) else baseHeight
+            wlp.x = secondaryChargeX(targetWidth)
             wlp.y = secondaryChargeY()
-            chargeRoot?.let { v -> runCatching { wm.updateViewLayout(v, wlp) } }
+            val windowRoot = chargeRoot
+            if (windowRoot != null && motionEnabled() && (wlp.width != targetWidth || wlp.height != targetHeight)) {
+                // Cancel from the current frame, not from the old start size, so direction changes remain continuous.
+                chargeResizeAnimator?.cancel()
+                val startWidth = wlp.width.coerceAtLeast(baseWidth)
+                val startHeight = wlp.height.coerceAtLeast(baseHeight)
+                chargeResizeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                    duration = 320L
+                    interpolator = android.view.animation.OvershootInterpolator(0.65f)
+                    addUpdateListener { animator ->
+                        val t = (animator.animatedValue as Float).coerceIn(0f, 1.12f)
+                        wlp.width = (startWidth + (targetWidth - startWidth) * t).toInt().coerceAtLeast(dp(76))
+                        wlp.height = (startHeight + (targetHeight - startHeight) * t).toInt().coerceAtLeast(dp(34))
+                        wlp.x = secondaryChargeX(wlp.width)
+                        runCatching { if (windowRoot.isAttachedToWindow) wm.updateViewLayout(windowRoot, wlp) }
+                    }
+                    start()
+                }
+            } else {
+                wlp.width = targetWidth
+                wlp.height = targetHeight
+                runCatching { windowRoot?.let { wm.updateViewLayout(it, wlp) } }
+            }
+            val justChangedExpansion = chargeLastExpandedState != chargePillExpanded
+            chargeLastExpandedState = chargePillExpanded
+            if (justChangedExpansion && motionEnabled()) {
+                // Crossfade the detail text while preserving the same icon and surface.
+                chargeWindowText?.animate()?.cancel()
+                chargeWindowText?.animate()?.alpha(0f)?.setDuration(85L)?.withEndAction {
+                    chargeWindowText?.animate()?.alpha(1f)?.setDuration(145L)?.start()
+                }?.start()
+            }
+        }
+    }
+
+    private fun setChargePillExpanded(value: Boolean) {
+        if (chargePillExpanded == value) return
+        chargePillExpanded = value
+        updateSeparateChargingPill()
+        chargeWindow?.let { content ->
+            content.animate().cancel()
+            if (motionEnabled()) {
+                content.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                    .setDuration(220L)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(0.45f))
+                    .start()
+            } else {
+                content.alpha = 1f
+                content.scaleX = 1f
+                content.scaleY = 1f
+            }
         }
     }
 
     private fun performChargePillGesture(key: String, defaultAction: String) {
         when (prefs.getString(key, defaultAction) ?: defaultAction) {
             "battery" -> openBatteryScreen()
-            "toggle" -> {
-                chargePillExpanded = !chargePillExpanded
-                updateSeparateChargingPill()
-                chargeWindow?.let { content ->
-                    content.animate().cancel()
-                    if (motionEnabled()) {
-                        content.alpha = 0.82f
-                        content.scaleX = 0.88f
-                        content.scaleY = 0.88f
-                        content.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                            .setDuration(240)
-                            .setInterpolator(android.view.animation.OvershootInterpolator(0.75f))
-                            .start()
-                    } else {
-                        content.alpha = 1f
-                        content.scaleX = 1f
-                        content.scaleY = 1f
-                    }
-                }
-            }
+            "toggle" -> setChargePillExpanded(!chargePillExpanded)
             else -> Unit
         }
     }
