@@ -185,15 +185,73 @@ class MainActivity : Activity() {
 
     // The main screen: a short list of categories
     private fun buildHome() {
-        button(col, "Setup and diagnostics") { open("setup") }
-        button(col, "Pill: size, position, gestures, and behaviour") { open("pill") }
-        button(col, "Music: player, visualizer, and height") { open("music") }
-        button(col, "Notifications: what shows, heights, and replies") { open("notifications") }
-        button(col, "Quick controls: control panel, tiles, and pinned apps") { open("quick") }
-        button(col, "Charging: status, alerts, and height") { open("charging") }
-        button(col, "Look: font, theme, blur, and image") { open("look") }
-        button(col, "Privacy: history and hidden apps") { open("privacy") }
-        button(col, "Tools: code generator, save and restore, test") { open("tools") }
+        homeTile("⚙", "Setup and diagnostics", "Permissions, service status and troubleshooting", "setup")
+        homeTile("◉", "Pill appearance", "Size, position, gestures and behaviour", "pill")
+        homeTile("♫", "Media player", "Playback controls, visualizer and layout", "music")
+        homeTile("▤", "Notifications", "Events, auto-collapse and quick replies", "notifications")
+        homeTile("⊞", "Quick controls", "Control panel, tiles and pinned apps", "quick")
+        homeTile("ϟ", "Charging", "Battery animation, alerts and layout", "charging")
+        homeTile("✧", "Appearance and motion", "Themes, typography, glass and animation", "look")
+        homeTile("◈", "Privacy", "History and hidden apps", "privacy")
+        homeTile("⌘", "Tools and backup", "Code generator, import, export and tests", "tools")
+    }
+
+    private fun homeTile(symbol: String, title: String, subtitle: String, destination: String) {
+        val tile = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(13), dp(12), dp(13))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF1B2A39.toInt(), 0xFF111A26.toInt())
+            ).apply {
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), 0xFF30485B.toInt())
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(9) }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { open(destination) }
+        }
+        tile.addView(TextView(this).apply {
+            text = symbol
+            textSize = 23f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(0xFF76E5C0.toInt())
+            background = GradientDrawable().apply {
+                setColor(0x223FE0B0)
+                cornerRadius = dp(14).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+        })
+        tile.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(13)
+                marginEnd = dp(6)
+            }
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 15.5f
+                setTextColor(Color.WHITE)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = subtitle
+                textSize = 11.5f
+                setTextColor(0xFF9AAABD.toInt())
+                setPadding(0, dp(3), 0, 0)
+            })
+        })
+        tile.addView(TextView(this).apply {
+            text = "›"
+            textSize = 26f
+            setTextColor(0xFF8CA2B8.toInt())
+            gravity = android.view.Gravity.CENTER
+        })
+        col.addView(tile)
     }
 
     private fun buildSetup() {
@@ -350,6 +408,28 @@ class MainActivity : Activity() {
         toggle(charge, "Charging alerts (when the charge reaches a level, or is full)", "chargeAlert", true)
         slider(charge, "Alert at charge (%)", "chargeAlertAt", 50, 100, 80)
         slider(charge, "Height: charging", "expH_charge", 40, 120, 64)
+        chargingStyleButton(charge)
+    }
+
+    private fun chargingStyleButton(parent: LinearLayout) {
+        val styles = listOf("Liquid battery", "Segmented battery", "Pulse battery")
+        fun current() = prefs.getInt("chargeIconStyle", 0).coerceIn(0, styles.lastIndex)
+        val b = styledButton().apply {
+            text = "Charging icon: " + styles[current()]
+            contentDescription = "Choose charging animation"
+        }
+        b.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Charging animation")
+                .setSingleChoiceItems(styles.toTypedArray(), current()) { dialog, which ->
+                    prefs.edit().putInt("chargeIconStyle", which).apply()
+                    b.text = "Charging icon: " + styles[which]
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        parent.addView(b)
     }
 
     private fun buildLook() {
