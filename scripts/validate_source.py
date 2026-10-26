@@ -55,6 +55,7 @@ checks = {
     "app theme choices include system light dark and AMOLED": all(name in main for name in ('"system", "light", "dark", "amoled"', "Follow system", "AMOLED black", "appThemeButton")),
     "secondary charging pill expands independently": "chargePillExpanded" in service and "chargeEta" in service and "chargePillExpanded = !chargePillExpanded" in service,
     "secondary charging pill expansion has liquid morph": "OvershootInterpolator(0.75f)" in service and "content.scaleX = 0.88f" in service,
+    "expanded charging pill lays out details across expanded surface": "FrameLayout.LayoutParams.MATCH_PARENT" in service and "if (chargePillExpanded) 1f else 0f" in service,
     "service status only appears in diagnostics": 'if (cat == "setup") col.addView(status)' not in main and "diag.addView(status)" in main,
 }
 for label, ok in checks.items():
