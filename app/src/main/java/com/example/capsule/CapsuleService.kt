@@ -3059,6 +3059,14 @@ class CapsuleService : NotificationListenerService() {
                 chargeWindowLp = null
             }
         }
+        // Keep the same icon view anchored as the surface grows; only scale it for expanded detail.
+        chargeWindowIcon?.animate()?.cancel()
+        chargeWindowIcon?.animate()
+            ?.scaleX(if (chargePillExpanded) 1.28f else 1f)
+            ?.scaleY(if (chargePillExpanded) 1.28f else 1f)
+            ?.setDuration(if (motionEnabled()) 260L else 0L)
+            ?.setInterpolator(android.view.animation.OvershootInterpolator(0.35f))
+            ?.start()
         chargeWindowText?.apply {
             text = if (chargePillExpanded) {
                 "$chargePct%  ·  $chargeEta\n" + lastTempC.toInt() + "°C  ·  " + (chargeWatts?.let { "%.1fW".format(it) } ?: "— W")
