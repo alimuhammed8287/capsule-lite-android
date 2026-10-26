@@ -7,6 +7,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiInfo
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.RectF
 import android.graphics.BitmapFactory
 import android.media.AudioDeviceInfo
 import android.content.pm.PackageManager
@@ -88,6 +90,11 @@ class CapsuleService : NotificationListenerService() {
     private lateinit var chargeRing: View
     private lateinit var chargeTime: TextView
     private lateinit var miniChargeRing: View
+    private var chargeFlightView: ImageView? = null
+    private var chargeFlightAnimator: ValueAnimator? = null
+    private var chargeFlightBitmap: Bitmap? = null
+    private var chargeFlightRect = RectF()
+    private var chargeFlightPending = false
     private var chargeEta = "ETA —"
     private lateinit var chargeTop: List<TextView>
     private lateinit var chargeBottom: List<TextView>
@@ -487,6 +494,7 @@ class CapsuleService : NotificationListenerService() {
     private fun teardown() {
         stopSpring()
         stopChargeSpring()
+        cancelChargeIconFlight()
         clearSnapshot()
         root?.let { clearAnimationsRecursively(it) }
         runCatching { stopForeground(true) }
@@ -1610,11 +1618,141 @@ class CapsuleService : NotificationListenerService() {
             applyVisibility()
             return
         }
+        val flight = prepareChargeIconFlight(e)
+        if (flight && e) chargeBox.alpha = 0f
         snapshotOld()
         expanded = e
         applyVisibility()
         staggerIn()
         animateSize()
+        if (flight) startChargeIconFlight(e)
+    }
+
+    private fun prepareChargeIconFlight(expanding: Boolean): Boolean {
+        val continuing = (chargeFlightAnimator != null || chargeFlightPending) && chargeFlightBitmap?.isRecycled == false
+        if (continuing) {
+            cancelChargeIconFlight(keepImage = true)
+            chargeRing.alpha = 0f
+            miniChargeRing.alpha = 0f
+            chargeFlightPending = true
+            return true
+        }
+        val source = if (expanding) miniChargeRing else chargeRing
+        val destination = if (expanding) chargeRing else miniChargeRing
+        if (source.width <= 0 || source.height <= 0 || source.visibility != View.VISIBLE) return false
+        val bitmap = runCatching {
+            Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888).also {
+                source.draw(Canvas(it))
+            }
+        }.getOrNull() ?: return false
+        val loc = IntArray(2)
+        source.getLocationOnScreen(loc)
+        chargeFlightBitmap?.takeIf { it !== bitmap && !it.isRecycled }?.recycle()
+        chargeFlightBitmap = bitmap
+        chargeFlightRect = RectF(loc[0].toFloat(), loc[1].toFloat(),
+            (loc[0] + source.width).toFloat(), (loc[1] + source.height).toFloat())
+        chargeFlightPending = true
+        source.alpha = 0f
+        destination.alpha = 0f
+        return true
+    }
+
+    private fun startChargeIconFlight(expanding: Boolean) {
+        val container = root as? FrameLayout ?: run {
+            cancelChargeIconFlight()
+            return
+        }
+        val destination = if (expanding) chargeRing else miniChargeRing
+        container.post {
+            val bitmap = chargeFlightBitmap
+            if (bitmap == null || bitmap.isRecycled || destination.width <= 0 || destination.height <= 0) {
+                cancelChargeIconFlight()
+                return@post
+            }
+            val screen = IntArray(2)
+            destination.getLocationOnScreen(screen)
+            val end = RectF(screen[0].toFloat(), screen[1].toFloat(),
+                (screen[0] + destination.width).toFloat(), (screen[1] + destination.height).toFloat())
+            val image = chargeFlightView ?: ImageView(uiCtx).also {
+                it.scaleType = ImageView.ScaleType.FIT_XY
+                chargeFlightView = it
+                container.addView(it, FrameLayout.LayoutParams(1, 1))
+            }
+            image.setImageBitmap(bitmap)
+            image.visibility = View.VISIBLE
+            val from = RectF(chargeFlightRect)
+            val duration = when (prefs.getInt("springPreset", 1)) {
+                0 -> 260L
+                2 -> 440L
+                else -> 340L
+            }
+            fun place(rect: RectF) {
+                val rootLoc = IntArray(2)
+                container.getLocationOnScreen(rootLoc)
+                val lp = image.layoutParams as FrameLayout.LayoutParams
+                lp.width = rect.width().toInt().coerceAtLeast(1)
+                lp.height = rect.height().toInt().coerceAtLeast(1)
+                lp.leftMargin = (rect.left - rootLoc[0] - container.paddingLeft).toInt()
+                lp.topMargin = (rect.top - rootLoc[1]).toInt()
+                image.layoutParams = lp
+                chargeFlightRect.set(rect)
+            }
+            place(from)
+            val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                this.duration = if (motionEnabled()) duration else 1L
+                interpolator = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+                addUpdateListener { a ->
+                    val f = a.animatedValue as Float
+                    val targetLoc = IntArray(2)
+                    destination.getLocationOnScreen(targetLoc)
+                    val liveEnd = RectF(targetLoc[0].toFloat(), targetLoc[1].toFloat(),
+                        (targetLoc[0] + destination.width).toFloat(), (targetLoc[1] + destination.height).toFloat())
+                    place(RectF(
+                        from.left + (liveEnd.left - from.left) * f,
+                        from.top + (liveEnd.top - from.top) * f,
+                        from.right + (liveEnd.right - from.right) * f,
+                        from.bottom + (liveEnd.bottom - from.bottom) * f
+                    ))
+                    chargeBox.alpha = if (expanding) f else 1f - f
+                    chargeTop.forEach { it.alpha = if (expanding) f else 1f - f }
+                    chargeBottom.forEach { it.alpha = if (expanding) f else 1f - f }
+                    miniRight.alpha = if (expanding) 1f - f else f
+                }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        if (chargeFlightAnimator !== animation) return
+                        chargeFlightAnimator = null
+                        cancelChargeIconFlight()
+                    }
+                })
+            }
+            chargeFlightPending = false
+            chargeFlightAnimator = animator
+            animator.start()
+        }
+    }
+
+    private fun cancelChargeIconFlight(keepImage: Boolean = false) {
+        chargeFlightPending = false
+        val animator = chargeFlightAnimator
+        chargeFlightAnimator = null
+        animator?.cancel()
+        chargeFlightView?.let { view ->
+            view.animate().cancel()
+            view.setImageDrawable(null)
+            view.visibility = View.GONE
+            (view.parent as? android.view.ViewGroup)?.removeView(view)
+        }
+        chargeFlightView = null
+        if (!keepImage) {
+            chargeFlightBitmap?.takeIf { !it.isRecycled }?.recycle()
+            chargeFlightBitmap = null
+            chargeRing.alpha = 1f
+            miniChargeRing.alpha = 1f
+            chargeBox.alpha = 1f
+            (chargeTop + chargeBottom).forEach { it.alpha = 1f }
+            miniRight.alpha = 1f
+        }
     }
 
     // Respect both the app's motion toggle and Android's system-wide animator setting.
@@ -1633,6 +1771,7 @@ class CapsuleService : NotificationListenerService() {
         if (!motionEnabled()) {
             // If motion is disabled while an entrance is queued, clear the old animation state too.
             for (v in items) {
+                if (chargeFlightPending && (v === chargeBox || v === miniRight)) continue
                 v.animate().cancel()
                 blurAnimators.remove(v)?.cancel()
                 if (android.os.Build.VERSION.SDK_INT >= 31) v.setRenderEffect(null)
@@ -1647,6 +1786,7 @@ class CapsuleService : NotificationListenerService() {
         lastStaggerAt = now
         var k = 0
         for (v in items) {
+            if (chargeFlightPending && (v === chargeBox || v === miniRight)) continue
             // Cancel even hidden children: an earlier delayed animator must not wake up after the
             // content mode has changed and mutate a view that is no longer part of the presentation.
             v.animate().cancel()
@@ -1876,6 +2016,7 @@ class CapsuleService : NotificationListenerService() {
     // A picture of what the pill shows now (without its black background). The old content blurs, shrinks
     // and fades out on top of the pill while the new content comes in underneath.
     private fun snapshotOld() {
+        if (chargeFlightPending) return
         if (android.os.Build.VERSION.SDK_INT < 31) return
         if (!motionEnabled()) {
             // If motion was disabled while a prior snapshot was fading out, remove it immediately.
