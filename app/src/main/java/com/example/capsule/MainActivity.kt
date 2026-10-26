@@ -419,6 +419,39 @@ class MainActivity : Activity() {
         slider(charge, "Separate pill vertical offset", "chargeMiniYOffset", -80, 120, 0)
         chargingStyleButton(charge)
         chargingIconButton(charge)
+
+        val gestures = card("Separate pill gestures")
+        TextView(this).apply {
+            text = "Choose actions for the charging pill independently from the main pill."
+            textSize = 12f
+            setTextColor(0xFF9DA6B5.toInt())
+            setPadding(dp(2), dp(2), dp(2), dp(6))
+        }.also { gestures.addView(it) }
+        chargeGestureButton(gestures, "chargePillTap", "Single tap")
+        chargeGestureButton(gestures, "chargePillDoubleTap", "Double tap")
+        chargeGestureButton(gestures, "chargePillLongPress", "Long press")
+    }
+
+    private fun chargeGestureButton(parent: LinearLayout, key: String, label: String) {
+        val actions = listOf("battery" to "Open battery screen", "toggle" to "Expand/collapse main pill", "none" to "Do nothing")
+        fun current() = (prefs.getString(key, if (key == "chargePillTap") "battery" else "none") ?: "none")
+            .let { value -> actions.indexOfFirst { it.first == value }.coerceAtLeast(0) }
+        val b = styledButton().apply {
+            text = "$label: " + actions[current()].second
+            contentDescription = "Configure separate charging pill $label"
+        }
+        b.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle(label + " action")
+                .setSingleChoiceItems(actions.map { it.second }.toTypedArray(), current()) { dialog, which ->
+                    prefs.edit().putString(key, actions[which].first).apply()
+                    b.text = "$label: " + actions[which].second
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        parent.addView(b)
     }
 
     private fun chargingStyleButton(parent: LinearLayout) {
