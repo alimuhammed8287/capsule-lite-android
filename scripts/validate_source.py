@@ -50,7 +50,7 @@ checks = {
     "charging pill has independent vertical offset": 'getInt("chargeMiniYOffset", 0)' in service,
     "charging icon supports distinct symbols": 'getInt("chargeIconShape", 0)' in service and "Lightning bolt" in main and "Power plug" in main,
     "secondary pill has independent morph entrance": "OvershootInterpolator(0.8f)" in service and "animate().alpha(1f).scaleX(1f).scaleY(1f)" in service,
-    "service status only appears in diagnostics": 'if (cat == "setup") col.addView(status)' in main,
+    "service status only appears in diagnostics": 'if (cat == "setup") col.addView(status)' not in main and "diag.addView(status)" in main,
 }
 for label, ok in checks.items():
     print(f"{'PASS' if ok else 'FAIL'}: {label}")
