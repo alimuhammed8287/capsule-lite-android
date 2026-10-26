@@ -464,7 +464,7 @@ class MainActivity : Activity() {
         val shown = card("Which notifications show")
         toggle(shown, "Other notifications", "showNotifs", true)
         toggle(shown, "Google Maps navigation", "showMaps", true)
-        toggle(shown, "Navigation info in the pill (reads Maps' navigation notification, and the Maps screen while it is open)", "mapsInfo", false)
+        toggle(shown, "Navigation info in the pill (reads Maps' navigation notification, and the Maps screen while it is open)", "mapsInfo", true)
         toggle(shown, "Use Maps' own turn arrow picture (turn off to use the arrows Capsule draws)", "mapsOwnArrow", true)
         toggle(shown, "Phone events (unlock, headphones, Bluetooth)", "showEvents", true)
         toggle(shown, "Downloads and progress activities", "showDownloads", true)
