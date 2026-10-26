@@ -21,7 +21,7 @@ policy = policy_path.read_text() if policy_path.exists() else ""
 main = (ROOT / "app/src/main/java/com/example/capsule/MainActivity.kt").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 checks = {
-    "versionCode 41": bool(re.search(r"versionCode\s*=\s*42\b", build)),
+    "versionCode 42": bool(re.search(r"versionCode\s*=\s*42\b", build)),
     "versionName 1.3.3": 'versionName = "1.3.4"' in build,
     "adaptive ticker": "nextTickDelayMs()" in service,
     "screen-aware visualizer": "isInteractive" in service,
@@ -77,6 +77,8 @@ checks = {
     "restore confirmation explains merge behavior": "Settings in this file will overwrite matching Capsule Lite choices." in main and "Settings not included in the file will remain unchanged." in main,
     "settings restore failures show feedback": 'saveMsg.text = "Could not restore: ${it.message ?: "invalid settings file"}"' in main and 'Toast.makeText(this, "Settings restore failed"' in main,
     "app theme choices include system light dark and AMOLED": all(name in main for name in ('"system", "light", "dark", "amoled"', "Follow system", "AMOLED black", "appThemeButton")),
+    "collapsed Maps pill displays remaining route distance": 'distanceLeft.takeIf { it.isNotEmpty() }?.let { "$it left" }' in service,
+    "Maps navigation defaults enabled": 'getBoolean("mapsInfo", true)' in service and '"mapsInfo", true)' in main,
     "secondary charging pill expands independently": "chargePillExpanded" in service and "chargeEta" in service and "chargePillExpanded = !chargePillExpanded" in service,
     "secondary charging pill resets expansion when hidden": "if (!shouldFloat) {" in service and "chargePillExpanded = false" in service,
     "secondary charging pill expansion has liquid morph": "OvershootInterpolator(0.75f)" in service and "content.scaleX = 0.88f" in service,
