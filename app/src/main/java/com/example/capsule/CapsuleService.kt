@@ -87,6 +87,7 @@ class CapsuleService : NotificationListenerService() {
     private var chargeWindowLp: WindowManager.LayoutParams? = null
     private var chargeWindowIcon: View? = null
     private var chargeWindowText: TextView? = null
+    private var chargePillExpanded = false
 
     private lateinit var miniText: TextView
     private lateinit var miniRight: TextView          // collapsed charging pill: the percentage, right of the camera hole
@@ -3043,10 +3044,18 @@ class CapsuleService : NotificationListenerService() {
                 chargeWindowLp = null
             }
         }
-        chargeWindowText?.text = "$chargePct%"
+        chargeWindowText?.apply {
+            text = if (chargePillExpanded) {
+                "$chargePct%  ·  $chargeEta\n" + lastTempC.toInt() + "°C  ·  " + (chargeWatts?.let { "%.1fW".format(it) } ?: "— W")
+            } else "$chargePct%"
+            textSize = if (chargePillExpanded) 10.5f else 12f
+            maxLines = if (chargePillExpanded) 2 else 1
+        }
         chargeWindowLp?.let { wlp ->
-            wlp.width = dp(prefs.getInt("chargeMiniW", 100).coerceIn(76, 150))
-            wlp.height = dp(prefs.getInt("chargeMiniH", 42).coerceIn(34, 64))
+            val baseWidth = dp(prefs.getInt("chargeMiniW", 100).coerceIn(76, 150))
+            val baseHeight = dp(prefs.getInt("chargeMiniH", 42).coerceIn(34, 64))
+            wlp.width = if (chargePillExpanded) (baseWidth + dp(76)).coerceAtMost(resources.displayMetrics.widthPixels - dp(16)) else baseWidth
+            wlp.height = if (chargePillExpanded) baseHeight + dp(18) else baseHeight
             wlp.x = secondaryChargeX(wlp.width)
             wlp.y = secondaryChargeY()
             chargeRoot?.let { v -> runCatching { wm.updateViewLayout(v, wlp) } }
@@ -3056,7 +3065,10 @@ class CapsuleService : NotificationListenerService() {
     private fun performChargePillGesture(key: String, defaultAction: String) {
         when (prefs.getString(key, defaultAction) ?: defaultAction) {
             "battery" -> openBatteryScreen()
-            "toggle" -> setExpanded(!expanded)
+            "toggle" -> {
+                chargePillExpanded = !chargePillExpanded
+                updateSeparateChargingPill()
+            }
             else -> Unit
         }
     }
