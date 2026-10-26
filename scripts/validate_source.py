@@ -38,6 +38,7 @@ checks = {
     "CI artifact v46": "capsule-lite-v46-debug-apk" in workflow,
     "secondary charging overlay removed": all(token not in service for token in ("chargeRoot", "chargeWindow", "updateSeparateChargingPill", "separateChargePill")) and "Separate pill gestures" not in main,
     "compact and expanded charging use the same selected icon": "miniChargeRing = ChargeRingView" in service and "chargeRing = ChargeRingView" in service and service.count('getInt("chargeIconShape", 0)') >= 2,
+    "charging icon uses a shared interruptible continuity transition": all(token in service for token in ("prepareChargeIconFlight", "startChargeIconFlight", "chargeFlightRect", "ValueAnimator.ofFloat(0f, 1f)", "destination.getLocationOnScreen(targetLoc)", "cancelChargeIconFlight(keepImage = true)")) and "if (chargeFlightPending) return" in service,
     "charging settings expose main pill and icon selectors": 'Show charging status in the main pill' in main and 'Charging animation:' in main and 'Charging icon:' in main and all(token not in main for token in ("chargePillTap", "chargeMiniW", "chargeMiniH", "chargeMiniYOffset")),
     "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
     "collapsed Maps pill prioritises remaining route distance in leading text": "private fun mapsMiniText(): String = MapsNav.distanceLeft.ifEmpty { MapsNav.turnDistance.ifEmpty { MapsNav.eta.ifEmpty { \"Maps\" } } }" in service,
