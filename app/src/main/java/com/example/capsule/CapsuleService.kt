@@ -1749,11 +1749,13 @@ class CapsuleService : NotificationListenerService() {
         if (!keepImage) {
             chargeFlightBitmap?.takeIf { !it.isRecycled }?.recycle()
             chargeFlightBitmap = null
-            chargeRing.alpha = 1f
-            miniChargeRing.alpha = 1f
-            chargeBox.alpha = 1f
-            (chargeTop + chargeBottom).forEach { it.alpha = 1f }
-            miniRight.alpha = 1f
+            if (::chargeRing.isInitialized) chargeRing.alpha = 1f
+            if (::miniChargeRing.isInitialized) miniChargeRing.alpha = 1f
+            if (::chargeBox.isInitialized) chargeBox.alpha = 1f
+            if (::chargeTop.isInitialized && ::chargeBottom.isInitialized) {
+                (chargeTop + chargeBottom).forEach { it.alpha = 1f }
+            }
+            if (::miniRight.isInitialized) miniRight.alpha = 1f
         }
     }
 
