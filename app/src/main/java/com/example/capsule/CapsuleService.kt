@@ -4285,11 +4285,13 @@ class CapsuleService : NotificationListenerService() {
         // being connected or a battery that has already reached FULL.
         charging = plugged != 0 && status == BatteryManager.BATTERY_STATUS_CHARGING
         chargePct = level * 100 / scale
-        if (!charging) {
+        val pluggedOrFull = plugged != 0 &&
+            status in setOf(BatteryManager.BATTERY_STATUS_CHARGING, BatteryManager.BATTERY_STATUS_FULL)
+        if (!pluggedOrFull) {
             chargeAlerted = false
             fullAlerted = false
         } else if (prefs.getBoolean("chargeAlert", true)) {
-            if (chargePct >= prefs.getInt("chargeAlertAt", 80) && !chargeAlerted) {
+            if (charging && chargePct >= prefs.getInt("chargeAlertAt", 80) && !chargeAlerted) {
                 chargeAlerted = true
                 uiPost { showEvent("Reached $chargePct%") }
             }
