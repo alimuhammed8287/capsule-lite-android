@@ -780,7 +780,7 @@ class CapsuleService : NotificationListenerService() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { marginEnd = dp(12) }
         }
-        chargeRing = ChargeRingView(uiCtx).apply {
+        chargeRing = ChargeRingView(uiCtx) { prefs.getInt("chargeIconStyle", 0) }.apply {
             layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(12) }
         }
         chargeTime = TextView(uiCtx).apply {
@@ -966,7 +966,7 @@ class CapsuleService : NotificationListenerService() {
                 setOnClickListener { runNotifAction(idx) }
             }
         }
-        miniChargeRing = ChargeRingView(uiCtx).apply {
+        miniChargeRing = ChargeRingView(uiCtx) { prefs.getInt("chargeIconStyle", 0) }.apply {
             layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginStart = dp(8); marginEnd = dp(2) }
             visibility = View.GONE
         }
@@ -2148,7 +2148,7 @@ class CapsuleService : NotificationListenerService() {
 
     // Charging indicator: an animated battery silhouette with a travelling fill and bolt.
     // This replaces the busy circular spinner in both compact and expanded pill layouts.
-    private class ChargeRingView(ctx: Context) : View(ctx) {
+    private class ChargeRingView(ctx: Context, private val selectedStyle: () -> Int) : View(ctx) {
         private val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
             strokeCap = android.graphics.Paint.Cap.ROUND
@@ -2202,7 +2202,7 @@ class CapsuleService : NotificationListenerService() {
             canvas.drawRoundRect(terminal, unit * 0.04f, unit * 0.04f, fill)
             val inset = stroke * 1.8f
             inner.set(left + inset, top + inset, left + bw - inset, top + bh - inset)
-            val style = (phase * 3f).toInt().coerceIn(0, 2)
+            val style = selectedStyle().coerceIn(0, 2)
             val wave = (0.5 + 0.5 * kotlin.math.sin(phase * Math.PI * 6.0)).toFloat()
             canvas.save()
             canvas.clipRect(inner)
