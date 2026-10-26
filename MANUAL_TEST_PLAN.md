@@ -1,6 +1,6 @@
-# Capsule Lite v38 — final device test plan
+# Capsule Lite v44 — combined regression and release test plan
 
-Run only after the v38 debug APK builds successfully. Record pass/fail and device/OS version for each section.
+Run after the v44 debug APK builds successfully. Record pass/fail and device/OS version for each section.
 
 ## A. Install and permissions
 - [ ] Install over the prior version without losing existing settings.
@@ -44,3 +44,13 @@ Run only after the v38 debug APK builds successfully. Record pass/fail and devic
 - APK version and build commit:
 - Failed checks and copied diagnostics:
 - Battery observations (duration, start/end percentage, visualizer state):
+
+
+## F. v44 focused acceptance checks
+- [ ] During active Maps navigation, the collapsed pill shows remaining route distance first when available.
+- [ ] If total route distance is unavailable, the collapsed pill falls back to next-turn distance, then ETA, then Maps.
+- [ ] Switch repeatedly between charging, Maps, media, calls, and ordinary notifications; verify no stale icon/text or stuck overlay remains.
+- [ ] Enable Reduce Motion and repeat expand/collapse; confirm dimensions and text remain correct.
+- [ ] Disable and restore notification access; confirm service recovery and overlay restoration.
+- [ ] Confirm blur and tinted fallback paths do not leave a dim layer behind.
+- [ ] Reboot and verify configured keep-running behavior and diagnostics.
