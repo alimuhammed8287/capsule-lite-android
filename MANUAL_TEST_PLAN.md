@@ -1,6 +1,16 @@
 # Capsule Lite v45 — charging pill bug-fix and regression test plan
 
-Run after the v44 debug APK builds successfully. Record pass/fail and device/OS version for each section.
+Run after the v45 debug APK builds successfully. Record pass/fail and device/OS version for each section.
+
+## A. Charging pill bug fixes
+- [ ] With charging disconnected, confirm the separate charging pill disappears after the battery broadcast.
+- [ ] Start charging while Maps, music, a call, or a notification owns the main pill; confirm the secondary pill appears.
+- [ ] Tap the secondary pill once; confirm it expands to show ETA, temperature, and wattage.
+- [ ] Tap again; confirm it collapses. Verify double-tap and long-press still follow their configured actions.
+- [ ] Verify the pill entrance, resize, and exit animations visibly spring/morph when motion is enabled.
+- [ ] Disable liquid motion or enable Reduce motion; confirm transitions become immediate/simplified without leaving the pill stuck.
+- [ ] Reach 100% while plugged in; confirm the separate pill hides but the full-charge alert still works when enabled.
+
 
 ## A. Install and permissions
 - [ ] Install over the prior version without losing existing settings.
