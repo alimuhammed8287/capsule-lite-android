@@ -89,6 +89,89 @@ class MainActivity : Activity() {
         "tools" to "Tools"
     )
 
+
+    private val sectionDescriptions = mapOf(
+        "setup" to "Check permissions, service health, and recovery options.",
+        "pill" to "Tune size, placement, gestures, and when the pill appears.",
+        "music" to "Choose playback controls and visualizer behaviour.",
+        "notifications" to "Control notification visibility, live activities, and replies.",
+        "quick" to "Personalise quick controls, tiles, and pinned apps.",
+        "charging" to "Customise charging status, animation, and the separate pill.",
+        "look" to "Choose colours, typography, glass styling, and motion.",
+        "privacy" to "Manage hidden apps and on-device notification history.",
+        "tools" to "Back up settings, restore a configuration, or reset preferences."
+    )
+
+    private fun addSettingsIntro() {
+        val isHome = cat == null
+        val accentTint = if (isLightAppTheme()) 0xFF087F6A.toInt() else 0xFF6CE5B2.toInt()
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(19), dp(19), dp(19), dp(18))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                if (isLightAppTheme()) intArrayOf(0xFFFFFFFF.toInt(), 0xFFE8F7F1.toInt())
+                else if (appTheme() == "amoled") intArrayOf(0xFF080B0A.toInt(), Color.BLACK)
+                else intArrayOf(0xFF1C3440.toInt(), 0xFF14231F.toInt())
+            ).apply {
+                cornerRadius = dp(24).toFloat()
+                setStroke(dp(1), if (isLightAppTheme()) 0xFFBBDDCF.toInt() else 0x446CE5B2)
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(4) }
+        }
+        hero.addView(TextView(this).apply {
+            text = if (isHome) "CAPSULE LITE  /  PERSONALISE" else "SETTINGS  /  " + (titles[cat] ?: "PREFERENCES").uppercase()
+            textSize = 10f
+            letterSpacing = 0.12f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setTextColor(accentTint)
+        })
+        hero.addView(TextView(this).apply {
+            text = if (isHome) "Make it yours." else (titles[cat] ?: "Settings")
+            textSize = if (isHome) 25f else 22f
+            letterSpacing = -0.025f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setTextColor(primaryTextColor())
+            setPadding(0, dp(5), 0, dp(4))
+        })
+        hero.addView(TextView(this).apply {
+            text = if (isHome) "Fine-tune your floating companion, from gestures and charging to privacy and motion."
+                else sectionDescriptions[cat] ?: "Adjust the options below to suit your setup."
+            textSize = 13f
+            setTextColor(secondaryTextColor())
+            setLineSpacing(dp(2).toFloat(), 1f)
+        })
+        if (isHome) {
+            val chips = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, dp(13), 0, 0)
+            }
+            listOf("9 SETTINGS AREAS", "BACKUP & RESTORE").forEach { label ->
+                chips.addView(TextView(this).apply {
+                    text = label
+                    textSize = 9f
+                    letterSpacing = 0.04f
+                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                    setTextColor(if (isLightAppTheme()) 0xFF176A59.toInt() else 0xFFB7F3D9.toInt())
+                    background = GradientDrawable().apply {
+                        setColor(if (isLightAppTheme()) 0xFFD9F1E7.toInt() else 0x223FE0B0)
+                        cornerRadius = dp(20).toFloat()
+                        setStroke(dp(1), if (isLightAppTheme()) 0xFFB9DFD1.toInt() else 0x336CE5B2)
+                    }
+                    setPadding(dp(10), dp(7), dp(10), dp(7))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { marginEnd = dp(7) }
+                })
+            }
+            hero.addView(chips)
+        }
+        col.addView(hero)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         DiagLog.installCrashHandler(this)
@@ -150,7 +233,8 @@ class MainActivity : Activity() {
                 bottomMargin = dp(14)
             }
         })
-        if (cat != null) button(col, "Back") { finish() }
+        addSettingsIntro()
+        if (cat != null) button(col, "‹  All settings") { finish() }
         status = TextView(this).apply {
             textSize = 13f
             setTextColor(primaryTextColor())
