@@ -720,7 +720,7 @@ class MainActivity : Activity() {
         }
     }
 
-    // Section descriptions and card hierarchy keep the settings screen readable at a glance.
+    // Section descriptions and card hierarchy keep settings easy to scan.
     private fun sectionDescription(title: String): String = when (title) {
         "App status and diagnostics" -> "Service health, recent events, and troubleshooting details."
         "Permissions" -> "Grant only the access needed for the features you want to use."
@@ -746,7 +746,7 @@ class MainActivity : Activity() {
         else -> "Adjust how this part of Capsule Lite behaves."
     }
 
-    // Rounded settings section with a clear title, short purpose, and divider before its controls.
+    // Theme-aware section card: title, purpose, divider, then the existing controls.
     private fun card(title: String): LinearLayout {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -785,24 +785,21 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             })
         })
-        box.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(9))
-            addView(View(this@MainActivity).apply {
-                background = GradientDrawable().apply {
-                    setColor(if (isLightAppTheme()) 0xFF168873.toInt() else 0xFF6CE5B2.toInt())
-                    cornerRadius = dp(3).toFloat()
-                }
-                layoutParams = LinearLayout.LayoutParams(dp(4), dp(18)).apply { marginEnd = dp(10) }
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = title
-                textSize = 14f
-                letterSpacing = -0.01f
-                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-                setTextColor(primaryTextColor())
-            })
+        box.addView(TextView(this).apply {
+            text = sectionDescription(title)
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setPadding(dp(22), dp(2), dp(2), dp(10))
+        })
+        box.addView(View(this).apply {
+            background = GradientDrawable().apply {
+                setColor(if (isLightAppTheme()) 0xFFE2E8F0.toInt() else if (appTheme() == "amoled") 0xFF242424.toInt() else 0xFF304254.toInt())
+                cornerRadius = dp(1).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                bottomMargin = dp(7)
+            }
         })
         col.addView(box)
         return box
