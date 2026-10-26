@@ -88,8 +88,13 @@ class CapsuleService : NotificationListenerService() {
     private var chargeWindowIcon: View? = null
     private var chargeWindowText: TextView? = null
     private var chargePillExpanded = false
-    private var chargeResizeAnimator: ValueAnimator? = null
     private var chargeLastExpandedState = false
+    // Independent damped springs drive the secondary pill surface; retargeting preserves velocity.
+    private val chargeSpringW = Spring()
+    private val chargeSpringH = Spring()
+    private var chargeSpringRunning = false
+    private var chargeSpringLast = 0L
+    private var chargeSurfaceShape: GradientDrawable? = null
 
     private lateinit var miniText: TextView
     private lateinit var miniRight: TextView          // collapsed charging pill: the percentage, right of the camera hole
@@ -496,6 +501,7 @@ class CapsuleService : NotificationListenerService() {
 
     private fun teardown() {
         stopSpring()
+        stopChargeSpring()
         clearSnapshot()
         root?.let { clearAnimationsRecursively(it) }
         runCatching { stopForeground(true) }
@@ -508,12 +514,19 @@ class CapsuleService : NotificationListenerService() {
         controller?.unregisterCallback(controllerCallback)
         controller = null
         runCatching { msm?.removeOnActiveSessionsChangedListener(sessionsListener) }
-        chargeRoot?.let { v -> runCatching { wm.removeView(v) } }
+        chargeRoot?.let { v ->
+            v.animate().cancel()
+            chargeWindow?.animate()?.cancel()
+            chargeWindowIcon?.animate()?.cancel()
+            chargeWindowText?.animate()?.cancel()
+            runCatching { wm.removeView(v) }
+        }
         chargeRoot = null
         chargeWindow = null
         chargeWindowLp = null
         chargeWindowIcon = null
         chargeWindowText = null
+        chargeSurfaceShape = null
         root?.let { v -> runCatching { wm.removeView(v) } }
         root = null
         pill = null
@@ -1814,6 +1827,105 @@ class CapsuleService : NotificationListenerService() {
         }
     }
 
+    // The secondary charging pill uses the same damped-spring model as the main pill.
+    // Width and height retain their current velocities when the target changes mid-flight.
+    private val chargeSpringFrame = object : android.view.Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            val windowRoot = chargeRoot
+            val wlp = chargeWindowLp
+            if (windowRoot == null || wlp == null || !windowRoot.isAttachedToWindow) {
+                chargeSpringRunning = false
+                chargeSpringLast = 0L
+                return
+            }
+            if (!motionEnabled()) {
+                wlp.width = chargeSpringW.target.toInt()
+                wlp.height = chargeSpringH.target.toInt()
+                chargeSpringW.value = chargeSpringW.target
+                chargeSpringH.value = chargeSpringH.target
+                chargeSpringW.velocity = 0f
+                chargeSpringH.velocity = 0f
+                updateChargeSurfaceFrame(windowRoot, wlp)
+                chargeSpringRunning = false
+                chargeSpringLast = 0L
+                return
+            }
+            val dt = if (chargeSpringLast == 0L) 1f / 60f
+                else ((frameTimeNanos - chargeSpringLast) / 1_000_000_000f).coerceIn(0f, 0.05f)
+            chargeSpringLast = frameTimeNanos
+            val speed = prefs.getString("springSpeed", "medium") ?: "medium"
+            val response = when (speed) {
+                "fast" -> 0.31f
+                "slow" -> 0.60f
+                else -> 0.42f
+            }
+            chargeSpringW.step(dt, response, 0.82f)
+            chargeSpringH.step(dt, response + 0.08f, 0.88f)
+            val done = chargeSpringW.settled(0.6f) && chargeSpringH.settled(0.6f)
+            if (done) {
+                chargeSpringW.value = chargeSpringW.target
+                chargeSpringH.value = chargeSpringH.target
+                chargeSpringW.velocity = 0f
+                chargeSpringH.velocity = 0f
+            }
+            wlp.width = chargeSpringW.value.toInt().coerceAtLeast(dp(76))
+            wlp.height = chargeSpringH.value.toInt().coerceAtLeast(dp(34))
+            updateChargeSurfaceFrame(windowRoot, wlp)
+            if (done) {
+                chargeSpringRunning = false
+                chargeSpringLast = 0L
+            } else {
+                android.view.Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+    }
+
+    private fun updateChargeSurfaceFrame(windowRoot: View, wlp: WindowManager.LayoutParams) {
+        wlp.x = secondaryChargeX(wlp.width)
+        chargeSurfaceShape?.cornerRadius = if (chargePillExpanded) dp(18).toFloat()
+            else minOf(wlp.height / 2f, dp(22).toFloat())
+        runCatching {
+            if (windowRoot.isAttachedToWindow) wm.updateViewLayout(windowRoot, wlp)
+        }
+    }
+
+    private fun stopChargeSpring() {
+        android.view.Choreographer.getInstance().removeFrameCallback(chargeSpringFrame)
+        chargeSpringRunning = false
+        chargeSpringLast = 0L
+    }
+
+    private fun animateChargeWindowSize(targetWidth: Int, targetHeight: Int) {
+        val windowRoot = chargeRoot ?: return
+        val wlp = chargeWindowLp ?: return
+        if (!motionEnabled()) {
+            stopChargeSpring()
+            wlp.width = targetWidth
+            wlp.height = targetHeight
+            chargeSpringW.value = targetWidth.toFloat()
+            chargeSpringW.target = targetWidth.toFloat()
+            chargeSpringW.velocity = 0f
+            chargeSpringH.value = targetHeight.toFloat()
+            chargeSpringH.target = targetHeight.toFloat()
+            chargeSpringH.velocity = 0f
+            updateChargeSurfaceFrame(windowRoot, wlp)
+            return
+        }
+        if (!chargeSpringRunning) {
+            chargeSpringW.value = wlp.width.toFloat()
+            chargeSpringH.value = wlp.height.toFloat()
+            chargeSpringW.velocity = 0f
+            chargeSpringH.velocity = 0f
+        }
+        chargeSpringW.target = targetWidth.toFloat()
+        chargeSpringH.target = targetHeight.toFloat()
+        if (!chargeSpringRunning) {
+            chargeSpringRunning = true
+            chargeSpringLast = 0L
+            android.view.Choreographer.getInstance().postFrameCallback(chargeSpringFrame)
+        }
+    }
+
     private fun stopSpring() {
         android.view.Choreographer.getInstance().removeFrameCallback(springFrame)
         springRunning = false
@@ -2933,6 +3045,8 @@ class CapsuleService : NotificationListenerService() {
         if (!shouldFloat) {
             // Do not carry expanded details into a later charging session or activity handoff.
             chargePillExpanded = false
+            stopChargeSpring()
+            chargeSurfaceShape = null
             val oldRoot = chargeRoot
             val oldContent = chargeWindow
             chargeRoot = null
@@ -2978,7 +3092,9 @@ class CapsuleService : NotificationListenerService() {
                 ).apply {
                     cornerRadius = dp(22).toFloat()
                     setStroke(dp(1), 0x6657DDB0)
-                }
+                }.also { chargeSurfaceShape = it }
+                clipToOutline = true
+                clipChildren = true
                 elevation = dp(8).toFloat()
                 addView(iconView)
                 addView(pct)
@@ -3095,29 +3211,7 @@ class CapsuleService : NotificationListenerService() {
             val targetHeight = if (chargePillExpanded) baseHeight + dp(18) else baseHeight
             wlp.x = secondaryChargeX(targetWidth)
             wlp.y = secondaryChargeY()
-            val windowRoot = chargeRoot
-            if (windowRoot != null && motionEnabled() && (wlp.width != targetWidth || wlp.height != targetHeight)) {
-                // Cancel from the current frame, not from the old start size, so direction changes remain continuous.
-                chargeResizeAnimator?.cancel()
-                val startWidth = wlp.width.coerceAtLeast(baseWidth)
-                val startHeight = wlp.height.coerceAtLeast(baseHeight)
-                chargeResizeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-                    duration = 320L
-                    interpolator = android.view.animation.OvershootInterpolator(0.65f)
-                    addUpdateListener { animator ->
-                        val t = (animator.animatedValue as Float).coerceIn(0f, 1.12f)
-                        wlp.width = (startWidth + (targetWidth - startWidth) * t).toInt().coerceAtLeast(dp(76))
-                        wlp.height = (startHeight + (targetHeight - startHeight) * t).toInt().coerceAtLeast(dp(34))
-                        wlp.x = secondaryChargeX(wlp.width)
-                        runCatching { if (windowRoot.isAttachedToWindow) wm.updateViewLayout(windowRoot, wlp) }
-                    }
-                    start()
-                }
-            } else {
-                wlp.width = targetWidth
-                wlp.height = targetHeight
-                runCatching { windowRoot?.let { wm.updateViewLayout(it, wlp) } }
-            }
+            animateChargeWindowSize(targetWidth, targetHeight)
             chargeLastExpandedState = chargePillExpanded
         }
     }
