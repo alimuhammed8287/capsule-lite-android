@@ -241,6 +241,7 @@ class MainActivity : Activity() {
             ).apply { topMargin = dp(11) }
             isClickable = true
             isFocusable = true
+            contentDescription = "$title. $subtitle"
             setOnClickListener { open(destination) }
         }
         tile.addView(TextView(this).apply {
