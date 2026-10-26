@@ -42,10 +42,10 @@ class MainActivity : Activity() {
         minHeight = dp(48)
         background = GradientDrawable(
             GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(0xFF242D3A.toInt(), 0xFF1B222D.toInt())
+            intArrayOf(0xFF26394A.toInt(), 0xFF17212E.toInt())
         ).apply {
-            cornerRadius = dp(15).toFloat()
-            setStroke(dp(1), 0xFF344152.toInt())
+            cornerRadius = dp(17).toFloat()
+            setStroke(dp(1), 0xFF426074.toInt())
         }
         setPadding(dp(15), dp(11), dp(15), dp(11))
         layoutParams = LinearLayout.LayoutParams(
@@ -112,7 +112,7 @@ class MainActivity : Activity() {
 
         setContentView(ScrollView(this).apply {
             isFillViewport = true
-            setBackgroundColor(0xFF090B10.toInt())
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF0A111B.toInt(), 0xFF101824.toInt(), 0xFF090B10.toInt()))
             addView(col)
         })
     }
@@ -399,10 +399,10 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF191F2A.toInt(), 0xFF11151D.toInt())
+                intArrayOf(0xFF1C2937.toInt(), 0xFF111923.toInt())
             ).apply {
                 cornerRadius = dp(22).toFloat()
-                setStroke(dp(1), 0xFF293342.toInt())
+                setStroke(dp(1), 0xFF34495B.toInt())
             }
             elevation = dp(2).toFloat()
             setPadding(dp(16), dp(15), dp(16), dp(16))
