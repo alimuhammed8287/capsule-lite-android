@@ -397,6 +397,7 @@ class MainActivity : Activity() {
         shown.addView(liveApps)
         button(shown, "Save live-activity app list") {
             prefs.edit().putString("liveActivityApps", liveApps.text.toString().trim()).apply()
+            android.widget.Toast.makeText(this, "Live-activity app list saved", android.widget.Toast.LENGTH_SHORT).show()
         }
         toggle(shown, "Driving mode (hide other notifications during Maps navigation)", "drivingMode", false)
         toggle(shown, "Colour the title from the sending app", "appAccent", true)
@@ -442,6 +443,7 @@ class MainActivity : Activity() {
                 .putString("replies", replyField.text.toString())
                 .putString("pinned", pinField.text.toString())
                 .apply()
+            android.widget.Toast.makeText(this, "Quick replies and pinned apps saved", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -588,6 +590,7 @@ class MainActivity : Activity() {
         privacy.addView(blockField)
         button(privacy, "Save hidden apps") {
             prefs.edit().putString("blockedApps", blockField.text.toString()).apply()
+            android.widget.Toast.makeText(this, "Hidden-app list saved", android.widget.Toast.LENGTH_SHORT).show()
         }
         button(privacy, "Open notification history") { startActivity(Intent(this, HistoryActivity::class.java)) }
     }
