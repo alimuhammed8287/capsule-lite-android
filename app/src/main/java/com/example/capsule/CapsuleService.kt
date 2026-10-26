@@ -3106,22 +3106,28 @@ class CapsuleService : NotificationListenerService() {
                 wlp.height = targetHeight
                 runCatching { windowRoot?.let { wm.updateViewLayout(it, wlp) } }
             }
-            val justChangedExpansion = chargeLastExpandedState != chargePillExpanded
             chargeLastExpandedState = chargePillExpanded
-            if (justChangedExpansion && motionEnabled()) {
-                // Crossfade the detail text while preserving the same icon and surface.
-                chargeWindowText?.animate()?.cancel()
-                chargeWindowText?.animate()?.alpha(0f)?.setDuration(85L)?.withEndAction {
-                    chargeWindowText?.animate()?.alpha(1f)?.setDuration(145L)?.start()
-                }?.start()
-            }
         }
     }
 
     private fun setChargePillExpanded(value: Boolean) {
         if (chargePillExpanded == value) return
-        chargePillExpanded = value
-        updateSeparateChargingPill()
+        val detailText = chargeWindowText
+        if (motionEnabled() && detailText != null) {
+            // Fade old content out first, keep the battery icon/surface in place, then reveal new details.
+            detailText.animate().cancel()
+            detailText.animate().alpha(0f).setDuration(80L).withEndAction {
+                chargePillExpanded = value
+                chargeLastExpandedState = value
+                updateSeparateChargingPill()
+                detailText.animate().alpha(1f).setDuration(150L).start()
+            }.start()
+        } else {
+            chargePillExpanded = value
+            chargeLastExpandedState = value
+            updateSeparateChargingPill()
+            detailText?.alpha = 1f
+        }
         chargeWindow?.let { content ->
             content.animate().cancel()
             if (motionEnabled()) {
