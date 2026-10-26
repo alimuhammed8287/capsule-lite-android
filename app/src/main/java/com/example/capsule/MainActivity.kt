@@ -1013,6 +1013,7 @@ class MainActivity : Activity() {
                         recreate()
                     }.onFailure {
                         saveMsg.text = "Could not restore: ${it.message ?: "invalid settings file"}"
+                        android.widget.Toast.makeText(this, "Settings restore failed", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
                 .show()
