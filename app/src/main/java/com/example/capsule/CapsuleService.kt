@@ -493,7 +493,6 @@ class CapsuleService : NotificationListenerService() {
 
     private fun teardown() {
         stopSpring()
-        stopChargeSpring()
         cancelChargeIconFlight()
         clearSnapshot()
         root?.let { clearAnimationsRecursively(it) }
