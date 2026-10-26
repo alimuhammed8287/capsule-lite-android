@@ -21,8 +21,8 @@ policy = policy_path.read_text() if policy_path.exists() else ""
 main = (ROOT / "app/src/main/java/com/example/capsule/MainActivity.kt").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 checks = {
-    "versionCode 43": bool(re.search(r"versionCode\s*=\s*43\b", build)),
-    "versionName 1.3.5": 'versionName = "1.3.5"' in build,
+    "versionCode 44": bool(re.search(r"versionCode\s*=\s*43\b", build)),
+    "versionName 1.3.6": 'versionName = "1.3.6"' in build,
     "adaptive ticker": "nextTickDelayMs()" in service,
     "screen-aware visualizer": "isInteractive" in service,
     "live activity classification": "fun classify(sbn: StatusBarNotification)" in policy,
@@ -33,11 +33,11 @@ checks = {
     "completion handoff": "finishLiveActivity" in service and "restoreNextLiveActivity" in service,
     "reduced motion setting": '"reduceMotion"' in main and '"reduceMotion"' in service,
     "CI builds debug APK": "assembleDebug" in workflow,
-    "CI artifact v43": "capsule-lite-v43-debug-apk" in workflow,
+    "CI artifact v44": "capsule-lite-v44-debug-apk" in workflow,
     "hybrid charging preference": 'getBoolean("separateChargePill", true)' in service,
     "charging handoff considers active activities": "callActive || showingNotif || mapsShown()" in service,
     "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
-    "collapsed Maps pill keeps next-turn distance in leading text": "private fun mapsMiniText(): String = MapsNav.turnDistance.ifEmpty { MapsNav.distanceLeft.ifEmpty { MapsNav.eta.ifEmpty { \"Maps\" } } }" in service,
+    "collapsed Maps pill prioritises remaining route distance in leading text": "private fun mapsMiniText(): String = MapsNav.distanceLeft.ifEmpty { MapsNav.turnDistance.ifEmpty { MapsNav.eta.ifEmpty { \"Maps\" } } }" in service,
     "Maps navigation pill enabled by default": 'toggle(shown, "Navigation info in the pill (reads Maps\' navigation notification, and the Maps screen while it is open)", "mapsInfo", true)' in main and 'getBoolean("mapsInfo", true)' in service and 'getBoolean("mapsInfo", false)' not in service,
     "secondary charging pill screen clamp": "screenH - dp(54)" in service and "secondaryChargeY()" in service,
     "settings switches have readable touch targets": "minHeight = dp(52)" in main and "setTextColor(primaryTextColor())" in main,
