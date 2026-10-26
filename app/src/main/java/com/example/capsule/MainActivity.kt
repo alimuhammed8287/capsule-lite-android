@@ -221,7 +221,7 @@ class MainActivity : Activity() {
                     letterSpacing = -0.035f
                 })
                 addView(TextView(this@MainActivity).apply {
-                    text = if (cat == null) "FLOATING COMPANION  ·  V1.3.5" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
+                    text = if (cat == null) "FLOATING COMPANION  ·  V1.3.6" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
                     textSize = 10f
                     letterSpacing = 0.08f
                     setTextColor(secondaryTextColor())
