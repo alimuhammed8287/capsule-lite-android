@@ -931,8 +931,12 @@ class MainActivity : Activity() {
                     if (k == "diag" || k == "testPill") continue
                     json.put(k, v)
                 }
-                contentResolver.openOutputStream(uri, "wt")?.use { it.write(json.toString(2).toByteArray()) }
-                    ?: error("could not open the file")
+                val output = contentResolver.openOutputStream(uri, "wt")
+                    ?: error("could not open the selected file for writing")
+                output.use { stream ->
+                    stream.write(json.toString(2).toByteArray(Charsets.UTF_8))
+                    stream.flush()
+                }
             }.onSuccess {
                 saveMsg.text = "Settings saved to the file."
             }.onFailure {
