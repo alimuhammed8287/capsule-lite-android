@@ -38,7 +38,7 @@ checks = {
     "charging handoff considers active activities": "callActive || showingNotif || mapsShown()" in service,
     "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
     "secondary charging pill screen clamp": "screenH - dp(54)" in service and "secondaryChargeY()" in service,
-    "settings switches have readable touch targets": "minHeight = dp(52)" in main and "setTextColor(0xFFE7EDF5.toInt())" in main,
+    "settings switches have readable touch targets": "minHeight = dp(52)" in main and "setTextColor(primaryTextColor())" in main,
     "frosted glass avoids whole-window blur": "flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND" not in service and "translucent, bordered surface" in service,
     "separate charging pill has independent gesture settings": all(key in main for key in ("chargePillTap", "chargePillDoubleTap", "chargePillLongPress")),
     "charging pill gestures are wired": all(key in service for key in ("performChargePillGesture", "onSingleTapConfirmed", "onDoubleTap", "onLongPress")),
