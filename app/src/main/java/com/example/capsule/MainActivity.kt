@@ -277,7 +277,7 @@ class MainActivity : Activity() {
         tile.addView(TextView(this).apply {
             text = "›"
             textSize = 26f
-            setTextColor(0xFF8CA2B8.toInt())
+            setTextColor(if (isLightAppTheme()) 0xFF64748B.toInt() else 0xFF8CA2B8.toInt())
             gravity = android.view.Gravity.CENTER
         })
         col.addView(tile)
