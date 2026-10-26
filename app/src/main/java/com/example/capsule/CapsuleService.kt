@@ -903,6 +903,19 @@ class CapsuleService : NotificationListenerService() {
             addView(navTile)
             addView(navMid)
             addView(navRight)
+            addView(TextView(uiCtx).apply {
+                text = "×"
+                contentDescription = "Exit Maps navigation pill"
+                setTextColor(0xFFDDE5F0.toInt())
+                textSize = 24f
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(dp(32), dp(40))
+                setOnClickListener {
+                    prefs.edit().putBoolean("mapsInfo", false).apply()
+                    setExpanded(false)
+                    applyVisibility()
+                }
+            })
         }
         row.removeAllViews()
         artRow.addView(icon)
@@ -918,6 +931,21 @@ class CapsuleService : NotificationListenerService() {
         ctrlRow.addView(btnPrev)
         ctrlRow.addView(btnPlay)
         ctrlRow.addView(btnNext)
+        val exitMedia = TextView(uiCtx).apply {
+            text = "×"
+            contentDescription = "Exit media player"
+            setTextColor(0xFFDDE5F0.toInt())
+            textSize = 24f
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(34), dp(38)).apply { marginStart = dp(4) }
+            setOnClickListener {
+                controller?.unregisterCallback(controllerCallback)
+                controller = null
+                setExpanded(false)
+                applyVisibility()
+            }
+        }
+        ctrlRow.addView(exitMedia)
         timeRow.addView(elapsedText)
         timeRow.addView(progress)
         timeRow.addView(remainText)
@@ -2118,101 +2146,80 @@ class CapsuleService : NotificationListenerService() {
         if (panelOpen) closePanel() else openPanel()
     }
 
-    // Charging icon: a ring with a gap that turns slowly, and a bolt that pulses.
-    // It only animates while it is on screen.
+    // Charging indicator: an animated battery silhouette with a travelling fill and bolt.
+    // This replaces the busy circular spinner in both compact and expanded pill layouts.
     private class ChargeRingView(ctx: Context) : View(ctx) {
-        private val ringPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        private val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
             strokeCap = android.graphics.Paint.Cap.ROUND
-            color = 0xFFE6E6E6.toInt()
+            strokeJoin = android.graphics.Paint.Join.ROUND
+            color = 0xFFEAF7F0.toInt()
         }
-        private val boltPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.FILL
-            color = 0xFFE6E6E6.toInt()
+            color = 0xFF56E39A.toInt()
         }
+        private val bolt = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.FILL
+            color = 0xFFFFFFFF.toInt()
+        }
+        private val body = android.graphics.RectF()
+        private val inner = android.graphics.RectF()
         private val boltPath = android.graphics.Path()
-        private val box = android.graphics.RectF()
-        private var spin = 0f
-        private var pulse = 0f
+        private var phase = 0f
         private val anim = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 6000
+            duration = 1800
             repeatCount = android.animation.ValueAnimator.INFINITE
             interpolator = android.view.animation.LinearInterpolator()
             addUpdateListener {
-                val f = it.animatedFraction
-                spin = f * 360f
-                pulse = (0.5 + 0.5 * Math.sin(f * 2.0 * Math.PI * 5.0)).toFloat()   // 5 pulses per turn
+                phase = it.animatedFraction
                 invalidate()
             }
         }
-
         private fun updateRunning() {
             if (isAttachedToWindow && isShown && windowVisibility == View.VISIBLE) {
                 if (!anim.isStarted) anim.start()
-            } else {
-                anim.cancel()
-            }
+            } else anim.cancel()
         }
-
-        override fun onAttachedToWindow() {
-            super.onAttachedToWindow()
-            updateRunning()
-        }
-
-        override fun onDetachedFromWindow() {
-            anim.cancel()
-            super.onDetachedFromWindow()
-        }
-
-        override fun onVisibilityChanged(changedView: View, visibility: Int) {
-            super.onVisibilityChanged(changedView, visibility)
-            updateRunning()
-        }
-
-        override fun onWindowVisibilityChanged(visibility: Int) {
-            super.onWindowVisibilityChanged(visibility)
-            updateRunning()
-        }
-
+        override fun onAttachedToWindow() { super.onAttachedToWindow(); updateRunning() }
+        override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
+        override fun onVisibilityChanged(changedView: View, visibility: Int) { super.onVisibilityChanged(changedView, visibility); updateRunning() }
+        override fun onWindowVisibilityChanged(visibility: Int) { super.onWindowVisibilityChanged(visibility); updateRunning() }
         override fun onDraw(canvas: android.graphics.Canvas) {
             val w = width.toFloat()
             val h = height.toFloat()
-            val size = minOf(w, h)
-            val stroke = size * 0.075f
-            ringPaint.strokeWidth = stroke
-            val r = size / 2f - stroke
-            val cx = w / 2f
-            val cy = h / 2f
-            // A continuous scalloped perimeter, matching the supplied charging reference.
-            // The phase moves around the perimeter like a travelling snake rather than spinning a broken arc.
-            val perimeter = android.graphics.Path()
-            val phase = Math.toRadians(spin.toDouble())
-            val points = 240
-            for (i in 0..points) {
-                val a = (i.toDouble() / points) * Math.PI * 2.0
-                val scallop = Math.sin(a * 12.0 + phase) * stroke * 0.72
-                val rr = r + scallop
-                val x = cx + Math.cos(a) * rr
-                val y = cy + Math.sin(a) * rr
-                if (i == 0) perimeter.moveTo(x.toFloat(), y.toFloat()) else perimeter.lineTo(x.toFloat(), y.toFloat())
-            }
-            perimeter.close()
-            canvas.drawPath(perimeter, ringPaint)
-
-            val k = 0.85f + 0.15f * pulse
-            val u = size * 0.30f
+            val unit = minOf(w, h)
+            if (unit <= 0f) return
+            val bw = unit * 0.62f
+            val bh = unit * 0.76f
+            val left = (w - bw) / 2f
+            val top = (h - bh) / 2f
+            val stroke = maxOf(1.5f, unit * 0.055f)
+            body.set(left, top, left + bw, top + bh)
+            outline.strokeWidth = stroke
+            canvas.drawRoundRect(body, unit * 0.13f, unit * 0.13f, outline)
+            val terminal = android.graphics.RectF(left + bw * 0.32f, top - unit * 0.10f, left + bw * 0.68f, top + unit * 0.015f)
+            canvas.drawRoundRect(terminal, unit * 0.04f, unit * 0.04f, fill)
+            val inset = stroke * 1.8f
+            inner.set(left + inset, top + inset, left + bw - inset, top + bh - inset)
             canvas.save()
-            canvas.translate(cx, cy)
-            canvas.scale(k, k)
+            canvas.clipRect(inner)
+            val level = 0.28f + 0.62f * (0.5f + 0.5f * kotlin.math.sin(phase * Math.PI * 2.0)).toFloat()
+            val fillTop = inner.bottom - inner.height() * level
+            canvas.drawRoundRect(inner.left, fillTop, inner.right, inner.bottom, unit * 0.07f, unit * 0.07f, fill)
+            canvas.restore()
+            val u = unit * 0.22f
+            canvas.save()
+            canvas.translate(w / 2f, h / 2f)
             boltPath.reset()
-            boltPath.moveTo(u * 0.15f, -u)
-            boltPath.lineTo(-u * 0.55f, u * 0.15f)
-            boltPath.lineTo(-u * 0.05f, u * 0.15f)
-            boltPath.lineTo(-u * 0.15f, u)
-            boltPath.lineTo(u * 0.55f, -u * 0.15f)
-            boltPath.lineTo(u * 0.05f, -u * 0.15f)
+            boltPath.moveTo(u * 0.18f, -u)
+            boltPath.lineTo(-u * 0.55f, u * 0.12f)
+            boltPath.lineTo(-u * 0.05f, u * 0.12f)
+            boltPath.lineTo(-u * 0.18f, u)
+            boltPath.lineTo(u * 0.58f, -u * 0.16f)
+            boltPath.lineTo(u * 0.08f, -u * 0.16f)
             boltPath.close()
-            canvas.drawPath(boltPath, boltPaint)
+            canvas.drawPath(boltPath, bolt)
             canvas.restore()
         }
     }
