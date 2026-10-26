@@ -108,9 +108,9 @@ class MainActivity : Activity() {
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(10), dp(14), dp(10))
             background = GradientDrawable().apply {
-                setColor(0xFF172332.toInt())
+                setColor(if (isLightAppTheme()) 0xFFFDFEFF.toInt() else if (appTheme() == "amoled") Color.BLACK else 0xFF172332.toInt())
                 cornerRadius = dp(18).toFloat()
-                setStroke(dp(1), 0x334EDDB0)
+                setStroke(dp(1), if (isLightAppTheme()) 0xFFD7E0E9.toInt() else if (appTheme() == "amoled") 0xFF303030.toInt() else 0x334EDDB0)
             }
             addView(TextView(this@MainActivity).apply {
                 text = "C"
@@ -132,7 +132,7 @@ class MainActivity : Activity() {
                 addView(TextView(this@MainActivity).apply {
                     text = if (cat == null) "Capsule Lite" else titles[cat] ?: "Settings"
                     textSize = 26f
-                    setTextColor(Color.WHITE)
+                    setTextColor(primaryTextColor())
                     setTypeface(Typeface.create("sans-serif", Typeface.BOLD))
                     letterSpacing = -0.035f
                 })
@@ -140,7 +140,7 @@ class MainActivity : Activity() {
                     text = if (cat == null) "FLOATING COMPANION  ·  V1.3" else "PERSONALISE YOUR EXPERIENCE"
                     textSize = 10f
                     letterSpacing = 0.08f
-                    setTextColor(0xFF91A2B7.toInt())
+                    setTextColor(secondaryTextColor())
                     setPadding(0, dp(3), 0, 0)
                 })
             })
@@ -153,7 +153,7 @@ class MainActivity : Activity() {
         if (cat != null) button(col, "Back") { finish() }
         status = TextView(this).apply {
             textSize = 13f
-            setTextColor(0xFFE7EDF5.toInt())
+            setTextColor(primaryTextColor())
             setPadding(dp(8), dp(8), dp(8), dp(12))
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
@@ -869,7 +869,7 @@ class MainActivity : Activity() {
         val start = stored.coerceIn(lo, hi)
         // Normalize stale or imported settings so the caption and thumb always agree.
         if (stored != start) prefs.edit().putInt(key, start).apply()
-        val caption = TextView(this).apply { text = "$label: $start" }
+        val caption = TextView(this).apply { text = "$label: $start"; setTextColor(primaryTextColor()) }
         parent.addView(caption)
         parent.addView(SeekBar(this).apply {
             contentDescription = label
