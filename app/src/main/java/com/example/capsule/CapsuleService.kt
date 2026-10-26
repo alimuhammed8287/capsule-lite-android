@@ -797,7 +797,7 @@ class CapsuleService : NotificationListenerService() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { marginEnd = dp(12) }
         }
-        chargeRing = ChargeRingView(uiCtx) { prefs.getInt("chargeIconStyle", 0) }.apply {
+        chargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 0) }).apply {
             layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(12) }
         }
         chargeTime = TextView(uiCtx).apply {
@@ -2165,7 +2165,7 @@ class CapsuleService : NotificationListenerService() {
 
     // Charging indicator: an animated battery silhouette with a travelling fill and bolt.
     // This replaces the busy circular spinner in both compact and expanded pill layouts.
-    private class ChargeRingView(ctx: Context, private val selectedStyle: () -> Int) : View(ctx) {
+    private class ChargeRingView(ctx: Context, private val selectedStyle: () -> Int, private val selectedShape: () -> Int = { 0 }) : View(ctx) {
         private val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
             strokeCap = android.graphics.Paint.Cap.ROUND
@@ -2214,11 +2214,44 @@ class CapsuleService : NotificationListenerService() {
             val stroke = maxOf(1.5f, unit * 0.055f)
             body.set(left, top, left + bw, top + bh)
             outline.strokeWidth = stroke
-            canvas.drawRoundRect(body, unit * 0.13f, unit * 0.13f, outline)
-            val terminal = android.graphics.RectF(left + bw * 0.32f, top - unit * 0.10f, left + bw * 0.68f, top + unit * 0.015f)
-            canvas.drawRoundRect(terminal, unit * 0.04f, unit * 0.04f, fill)
             val inset = stroke * 1.8f
             inner.set(left + inset, top + inset, left + bw - inset, top + bh - inset)
+            val shape = selectedShape().coerceIn(0, 4)
+            if (shape == 0) {
+                canvas.drawRoundRect(body, unit * 0.13f, unit * 0.13f, outline)
+                val terminal = android.graphics.RectF(left + bw * 0.32f, top - unit * 0.10f, left + bw * 0.68f, top + unit * 0.015f)
+                canvas.drawRoundRect(terminal, unit * 0.04f, unit * 0.04f, fill)
+            } else {
+                val cx = w / 2f
+                val cy = h / 2f
+                val p = android.graphics.Path()
+                when (shape) {
+                    1 -> { // Lightning bolt
+                        p.moveTo(cx + unit*.06f, cy-unit*.38f); p.lineTo(cx-unit*.20f, cy+unit*.02f)
+                        p.lineTo(cx-unit*.02f, cy+unit*.02f); p.lineTo(cx-unit*.07f, cy+unit*.36f)
+                        p.lineTo(cx+unit*.20f, cy-unit*.08f); p.lineTo(cx+unit*.03f, cy-unit*.08f); p.close()
+                    }
+                    2 -> { // Power plug
+                        p.moveTo(cx-unit*.16f,cy-unit*.22f); p.lineTo(cx-unit*.16f,cy-unit*.02f)
+                        p.quadTo(cx,cy+unit*.15f,cx+unit*.16f,cy-unit*.02f); p.lineTo(cx+unit*.16f,cy-unit*.22f)
+                        p.moveTo(cx,cy+unit*.13f); p.lineTo(cx,cy+unit*.31f)
+                        canvas.drawLine(cx-unit*.24f,cy-unit*.24f,cx-unit*.24f,cy-unit*.04f,outline)
+                        canvas.drawLine(cx+unit*.24f,cy-unit*.24f,cx+unit*.24f,cy-unit*.04f,outline)
+                    }
+                    3 -> { // Leaf
+                        p.moveTo(cx-unit*.25f,cy+unit*.25f); p.quadTo(cx-unit*.20f,cy-unit*.28f,cx+unit*.25f,cy-unit*.25f)
+                        p.quadTo(cx+unit*.25f,cy+unit*.20f,cx-unit*.25f,cy+unit*.25f); p.close()
+                        p.moveTo(cx-unit*.18f,cy+unit*.18f); p.lineTo(cx+unit*.16f,cy-unit*.15f)
+                    }
+                    else -> { // Spark
+                        p.moveTo(cx,cy-unit*.36f); p.lineTo(cx+unit*.09f,cy-unit*.08f)
+                        p.lineTo(cx+unit*.34f,cy); p.lineTo(cx+unit*.09f,cy+unit*.08f)
+                        p.lineTo(cx,cy+unit*.36f); p.lineTo(cx-unit*.09f,cy+unit*.08f)
+                        p.lineTo(cx-unit*.34f,cy); p.lineTo(cx-unit*.09f,cy-unit*.08f); p.close()
+                    }
+                }
+                if (shape == 2 || shape == 3) canvas.drawPath(p, outline) else canvas.drawPath(p, fill)
+            }
             val style = selectedStyle().coerceIn(0, 2)
             val wave = (0.5 + 0.5 * kotlin.math.sin(phase * Math.PI * 6.0)).toFloat()
             canvas.save()
