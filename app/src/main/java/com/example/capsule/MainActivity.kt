@@ -939,45 +939,54 @@ class MainActivity : Activity() {
                 saveMsg.text = "Could not save: ${it.message}"
             }
         }
-        // Restore: read a saved file and apply every setting in it
+        // Restore: ask before applying a settings file over the current configuration.
         if (requestCode == 9 && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
-            runCatching {
-                val text = contentResolver.openInputStream(uri)?.use { input ->
-                    input.bufferedReader().use { reader ->
-                        val out = StringBuilder()
-                        val buffer = CharArray(8192)
-                        while (true) {
-                            val count = reader.read(buffer)
-                            if (count < 0) break
-                            if (out.length + count > 1_000_000) {
-                                error("settings file is too large (maximum 1 MB)")
+            AlertDialog.Builder(this)
+                .setTitle("Restore settings?")
+                .setMessage("Settings in this file will be applied to Capsule Lite and may replace your current choices. Export your current settings first if you want a backup.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Restore") { _, _ ->
+                    runCatching {
+                        val text = contentResolver.openInputStream(uri)?.use { input ->
+                            input.bufferedReader().use { reader ->
+                                val out = StringBuilder()
+                                val buffer = CharArray(8192)
+                                while (true) {
+                                    val count = reader.read(buffer)
+                                    if (count < 0) break
+                                    if (out.length + count > 1_000_000) {
+                                        error("settings file is too large (maximum 1 MB)")
+                                    }
+                                    out.append(buffer, 0, count)
+                                }
+                                out.toString()
                             }
-                            out.append(buffer, 0, count)
+                        } ?: error("could not open the file")
+                        val json = JSONObject(text)
+                        val edit = prefs.edit()
+                        val keys = json.keys()
+                        while (keys.hasNext()) {
+                            val k = keys.next()
+                            if (k == "diag" || k == "testPill") continue
+                            when (val v = json.get(k)) {
+                                is Boolean -> edit.putBoolean(k, v)
+                                is Int -> edit.putInt(k, v)
+                                is Long -> edit.putLong(k, v)
+                                is Double -> edit.putFloat(k, v.toFloat())
+                                is String -> edit.putString(k, v)
+                            }
                         }
-                        out.toString()
-                    }
-                } ?: error("could not open the file")
-                val json = JSONObject(text)
-                val edit = prefs.edit()
-                val keys = json.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    if (k == "diag" || k == "testPill") continue
-                    when (val v = json.get(k)) {
-                        is Boolean -> edit.putBoolean(k, v)
-                        is Int -> edit.putInt(k, v)
-                        is Long -> edit.putLong(k, v)
-                        is Double -> edit.putFloat(k, v.toFloat())
-                        is String -> edit.putString(k, v)
+                        edit.apply()
+                    }.onSuccess {
+                        saveMsg.text = "Settings restored from the file."
+                        android.widget.Toast.makeText(this, "Settings restored", android.widget.Toast.LENGTH_SHORT).show()
+                        recreate()
+                    }.onFailure {
+                        saveMsg.text = "Could not restore: ${it.message ?: "invalid settings file"}"
                     }
                 }
-                edit.apply()
-            }.onSuccess {
-                recreate()
-            }.onFailure {
-                saveMsg.text = "Could not restore: ${it.message}"
-            }
+                .show()
         }
         if (requestCode == 7 && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
