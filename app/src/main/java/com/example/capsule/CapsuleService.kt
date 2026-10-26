@@ -3192,8 +3192,15 @@ class CapsuleService : NotificationListenerService() {
             miniRight.textSize = 15f * k
             miniRight.setTextColor(0xFF30D158.toInt())
         } else if (mapsSplit) {
-            miniRight.text = MapsNav.eta.ifEmpty { MapsNav.distanceLeft }
-            miniRight.textSize = 15f * k
+            val eta = MapsNav.eta.trim()
+            val distanceLeft = MapsNav.distanceLeft.trim()
+            // Show both remaining time and full-trip distance in the collapsed pill.
+            miniRight.text = listOf(
+                eta,
+                distanceLeft.takeIf { it.isNotEmpty() }?.let { "$it left" }
+            ).filter { !it.isNullOrBlank() }.joinToString(" · ")
+                .ifEmpty { MapsNav.arrival.ifEmpty { MapsNav.turnDistance } }
+            miniRight.textSize = 12f * k
             miniRight.setTextColor(0xFF30D158.toInt())
         } else {
             miniRight.text = "⚡ $chargePct%"
@@ -3442,7 +3449,7 @@ class CapsuleService : NotificationListenerService() {
 
     // Collapsed navigation text: the distance to the next turn. The ETA sits on the other side of the camera hole.
     // In the collapsed pill, prioritise total trip distance (for example, "12 km") over the short distance to the next maneuver. Fall back to turn distance if Maps has not exposed a trip distance yet.
-    private fun mapsMiniText(): String = MapsNav.distanceLeft.ifEmpty { MapsNav.turnDistance }
+    private fun mapsMiniText(): String = MapsNav.turnDistance.ifEmpty { MapsNav.distanceLeft.ifEmpty { MapsNav.eta.ifEmpty { "Maps" } } }
 
     private fun navArrowRes(dir: String): Int = when (dir) {
         "left" -> R.drawable.ic_nav_left
