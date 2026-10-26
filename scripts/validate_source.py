@@ -62,6 +62,7 @@ checks = {
     "package-name fields disable autocorrect suggestions": main.count("TYPE_TEXT_FLAG_NO_SUGGESTIONS") >= 3,
     "custom settings saves show confirmation": all(message in main for message in ("Live-activity app list saved", "Quick replies and pinned apps saved", "Hidden-app list saved")),
     "reset to defaults requires explicit confirmation": 'setTitle("Reset all settings?")' in main and 'setNegativeButton("Cancel", null)' in main and 'setPositiveButton("Reset")' in main,
+    "restoring settings requires explicit confirmation": 'setTitle("Restore settings?")' in main and 'setPositiveButton("Restore")' in main and 'setNegativeButton("Cancel", null)' in main and 'Settings restored from the file.' in main,
     "app theme choices include system light dark and AMOLED": all(name in main for name in ('"system", "light", "dark", "amoled"', "Follow system", "AMOLED black", "appThemeButton")),
     "secondary charging pill expands independently": "chargePillExpanded" in service and "chargeEta" in service and "chargePillExpanded = !chargePillExpanded" in service,
     "secondary charging pill resets expansion when hidden": "if (!shouldFloat) {" in service and "chargePillExpanded = false" in service,
