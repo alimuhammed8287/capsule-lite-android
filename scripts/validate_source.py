@@ -44,6 +44,7 @@ checks = {
     "charging pill gestures are wired": all(key in service for key in ("performChargePillGesture", "onSingleTapConfirmed", "onDoubleTap", "onLongPress")),
     "distinct charging icon shapes are selectable": "chargeIconShape" in main and "selectedShape()" in service,
     "separate charging pill has independent size controls": all(key in main for key in ("chargeMiniW", "chargeMiniH", "chargeMiniYOffset")),
+    "app status is inside diagnostics only": 'if (cat == "setup") col.addView(status)' not in main and "val diag = card(\"App status and diagnostics\")" in main and "diag.addView(status)" in main,
     "charging pill is positioned beside the main pill": "private fun secondaryChargeX(chargeWidth: Int)" in service and "dp(8) + chargeWidth / 2" in service,
     "charging pill has independent width and height": 'getInt("chargeMiniW", 100)' in service and 'getInt("chargeMiniH", 42)' in service,
     "charging pill has independent vertical offset": 'getInt("chargeMiniYOffset", 0)' in service,
