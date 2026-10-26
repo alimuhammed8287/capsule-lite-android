@@ -175,6 +175,9 @@ class CapsuleService : NotificationListenerService() {
     private var miniH = 0
     private var expW = 0
     private var expH = 0
+    // Persist the resolved overlay offsets so secondary overlays can follow the main pill.
+    private var resolvedTopY = 0
+    private var resolvedOffX = 0
 
     private var expanded = false
     private var showingNotif = false
@@ -551,6 +554,8 @@ class CapsuleService : NotificationListenerService() {
         val offKey = if (land) "offXL" else "offX"
         if (prefs.contains(topKey)) topY = dp(prefs.getInt(topKey, 6))
         val offX = dp(prefs.getInt(offKey, 0))
+        resolvedTopY = topY
+        resolvedOffX = offX
 
         val accent = uiCtx.getColor(android.R.color.system_accent1_200)
 
@@ -2941,7 +2946,7 @@ class CapsuleService : NotificationListenerService() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                x = offX
+                x = resolvedOffX
                 y = secondaryChargeY()
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             }
@@ -2959,7 +2964,7 @@ class CapsuleService : NotificationListenerService() {
         }
         chargeWindowText?.text = "$chargePct%"
         chargeWindowLp?.let { wlp ->
-            wlp.x = offX
+            wlp.x = resolvedOffX
             wlp.y = secondaryChargeY()
             chargeRoot?.let { v -> runCatching { wm.updateViewLayout(v, wlp) } }
         }
@@ -2967,7 +2972,7 @@ class CapsuleService : NotificationListenerService() {
 
     private fun secondaryChargeY(): Int {
         val mainHeight = if (expanded) targetInnerH() else miniH
-        val desired = topY + mainHeight + dp(12)
+        val desired = resolvedTopY + mainHeight + dp(12)
         val screenH = resources.displayMetrics.heightPixels
         return desired.coerceAtMost((screenH - dp(54)).coerceAtLeast(dp(8)))
     }
