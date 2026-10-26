@@ -405,6 +405,7 @@ class MainActivity : Activity() {
     private fun buildCharging() {
         val charge = card("Charging")
         toggle(charge, "Show charging status", "showCharging", true)
+        toggle(charge, "Move charging into a separate pill while notifications, Maps, music or calls are active", "separateChargePill", true)
         toggle(charge, "Charging alerts (when the charge reaches a level, or is full)", "chargeAlert", true)
         slider(charge, "Alert at charge (%)", "chargeAlertAt", 50, 100, 80)
         slider(charge, "Height: charging", "expH_charge", 40, 120, 64)
