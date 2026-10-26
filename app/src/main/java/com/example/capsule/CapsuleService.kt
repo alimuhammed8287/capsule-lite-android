@@ -2926,7 +2926,10 @@ class CapsuleService : NotificationListenerService() {
         val activeActivity = callActive || showingNotif || mapsShown() ||
             (controller != null && showMusic()) || qsActive() || widgetActive() ||
             (expanded && !chargeExpandedShown())
-        val shouldFloat = showCharging() && prefs.getBoolean("separateChargePill", true) && charging && activeActivity
+        // Only float the pill while Android reports an active charging state. A plugged/full
+        // battery is not an active charging session and must not leave a stale mini-pill.
+        val shouldFloat = showCharging() && prefs.getBoolean("separateChargePill", true) &&
+            charging && activeActivity
         if (!shouldFloat) {
             // Do not carry expanded details into a later charging session or activity handoff.
             chargePillExpanded = false
@@ -3008,7 +3011,7 @@ class CapsuleService : NotificationListenerService() {
                         return false
                     }
                     override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                        performChargePillGesture("chargePillTap", "battery")
+                        performChargePillGesture("chargePillTap", "toggle")
                         return true
                     }
                     override fun onDoubleTap(e: MotionEvent): Boolean {
@@ -3039,7 +3042,8 @@ class CapsuleService : NotificationListenerService() {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -4277,8 +4281,9 @@ class CapsuleService : NotificationListenerService() {
         lastTempC = tempC
 
         val wasCharging = charging
-        charging = plugged != 0 &&
-            (status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL)
+        // Only show the separate pill while Android reports active charging, not merely a cable
+        // being connected or a battery that has already reached FULL.
+        charging = plugged != 0 && status == BatteryManager.BATTERY_STATUS_CHARGING
         chargePct = level * 100 / scale
         if (!charging) {
             chargeAlerted = false
