@@ -285,10 +285,11 @@ class MainActivity : Activity() {
     private fun buildSetup() {
         val diag = card("App status and diagnostics")
         diag.addView(status)
-        repairText = TextView(this).apply { textSize = 13f }
+        repairText = TextView(this).apply { textSize = 13f; setTextColor(secondaryTextColor()) }
         diag.addView(repairText)
         diagText = TextView(this).apply {
             textSize = 11f
+            setTextColor(secondaryTextColor())
             typeface = Typeface.MONOSPACE
             setTextIsSelectable(true)
         }
@@ -303,6 +304,7 @@ class MainActivity : Activity() {
         TextView(this).apply {
             text = "Automatic repair is off by default. If you enable it, the optional ADB permission is also required. Turning this off prevents Capsule from re-enabling services you deliberately disabled."
             textSize = 12f
+            setTextColor(secondaryTextColor())
             setPadding(dp(8), dp(2), dp(8), dp(8))
         }.also { diag.addView(it) }
         button(diag, "Copy optional ADB permission command") { copyRepairCommand() }
@@ -448,7 +450,7 @@ class MainActivity : Activity() {
         TextView(this).apply {
             text = "Choose actions for the charging pill independently from the main pill."
             textSize = 12f
-            setTextColor(0xFF9DA6B5.toInt())
+            setTextColor(secondaryTextColor())
             setPadding(dp(2), dp(2), dp(2), dp(6))
         }.also { gestures.addView(it) }
         chargeGestureButton(gestures, "chargePillTap", "Single tap")
@@ -457,7 +459,7 @@ class MainActivity : Activity() {
     }
 
     private fun chargeGestureButton(parent: LinearLayout, key: String, label: String) {
-        val actions = listOf("battery" to "Open battery screen", "toggle" to "Expand/collapse main pill", "none" to "Do nothing")
+        val actions = listOf("battery" to "Open battery screen", "toggle" to "Expand/collapse charging pill", "none" to "Do nothing")
         fun current() = (prefs.getString(key, if (key == "chargePillTap") "battery" else "none") ?: "none")
             .let { value -> actions.indexOfFirst { it.first == value }.coerceAtLeast(0) }
         val b = styledButton().apply {
@@ -590,7 +592,7 @@ class MainActivity : Activity() {
                 addCategory(Intent.CATEGORY_OPENABLE)
             }, 9)
         }
-        saveMsg = TextView(this).apply { textSize = 13f }
+        saveMsg = TextView(this).apply { textSize = 13f; setTextColor(primaryTextColor()) }
         tools.addView(saveMsg)
         button(tools, "Reset to defaults") {
             prefs.edit().clear().apply()
@@ -751,7 +753,7 @@ class MainActivity : Activity() {
         parent.addView(TextView(this).apply {
             text = "Live style preview · applies to the floating pill and expanded panel"
             textSize = 11f
-            setTextColor(0xFF8E9AAA.toInt())
+            setTextColor(secondaryTextColor())
             setPadding(dp(2), 0, 0, dp(5))
         })
     }
