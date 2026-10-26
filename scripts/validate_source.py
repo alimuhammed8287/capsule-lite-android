@@ -39,7 +39,7 @@ checks = {
     "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
     "secondary charging pill screen clamp": "screenH - dp(54)" in service and "secondaryChargeY()" in service,
     "settings switches have readable touch targets": "minHeight = dp(52)" in main and "setTextColor(0xFFE7EDF5.toInt())" in main,
-    "frosted glass avoids whole-window blur": "FLAG_BLUR_BEHIND" not in service and "translucent, bordered surface" in service,
+    "frosted glass avoids whole-window blur": "flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND" not in service and "translucent, bordered surface" in service,
 }
 for label, ok in checks.items():
     print(f"{'PASS' if ok else 'FAIL'}: {label}")
