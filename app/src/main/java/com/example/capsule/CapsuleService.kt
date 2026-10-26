@@ -1013,12 +1013,11 @@ class CapsuleService : NotificationListenerService() {
         chips.forEach { it.textSize = 13f * k }
     }
 
-    // Shared surface alpha keeps the pill and expanded panel visually consistent. The slider
-    // controls translucency only; it does not request compositor-wide background blur.
+    // "Glass" mode is deliberately local to the pill. Android's FLAG_BLUR_BEHIND
+    // is a window-level effect and some OEM builds blur far beyond the rounded pill.
+    // We therefore use a translucent, bordered surface instead of blurring the whole screen.
     private fun surfaceColor(rgb: Int, opaqueAlpha: Int, glass: Boolean): Int {
-        // Keep glass surfaces translucent enough for compositor blur to remain visible.
-        // Blur radius now controls actual Android blur strength, not an inverse opacity.
-        val alpha = if (glass) 205 else opaqueAlpha
+        val alpha = if (glass) 158 else opaqueAlpha
         return (alpha shl 24) or (rgb and 0x00FFFFFF)
     }
 
@@ -1067,23 +1066,14 @@ class CapsuleService : NotificationListenerService() {
     // cross-window blur support. This API blurs content behind the overlay window; the
     // translucent themed drawable remains the graceful fallback on unsupported devices.
     private fun applyBlur() {
+        // Never request FLAG_BLUR_BEHIND here: on some HyperOS/Xiaomi builds the
+        // compositor effect spills outside the rounded overlay and blurs the screen.
+        // Keep the system backdrop sharp; themedSurface() supplies the local glass look.
         lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+        lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_BLUR_BEHIND.inv()
         lp.dimAmount = 0f
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val supported = runCatching { wm.isCrossWindowBlurEnabled }.getOrDefault(false)
-            if (supported) {
-                lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
-                lp.setBlurBehindRadius(dp(prefs.getInt("blurRadius", 40).coerceIn(10, 100)))
-                diag("glass: compositor blur enabled; radius=${prefs.getInt("blurRadius", 40)}dp")
-            } else {
-                lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_BLUR_BEHIND.inv()
-                lp.setBlurBehindRadius(0)
-                diag("glass: compositor blur unavailable; using tinted translucent fallback")
-            }
-        } else {
-            lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_BLUR_BEHIND.inv()
-            diag("glass: Android version does not support compositor blur; using tinted fallback")
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) lp.setBlurBehindRadius(0)
+        diag("glass: local pill-only translucent glass enabled; system backdrop blur disabled")
     }
 
     private fun widgetActive(): Boolean {
