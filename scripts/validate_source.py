@@ -59,6 +59,7 @@ checks = {
     "slider accessibility announces its current value": 'contentDescription = "$label: $start"' in main and 'sb.contentDescription = "$label: $value"' in main,
     "editable fields follow selected app theme": main.count("setHintTextColor(secondaryTextColor())") >= 4 and main.count("setTextColor(primaryTextColor())") >= 4,
     "editable fields and charging symbol have explicit accessibility labels": all(label in main for label in ("Live-activity app allow-list, comma-separated package names", "Quick reply messages, comma-separated, up to three", "Pinned app package names, comma-separated, up to four", "Apps whose notifications should be hidden, comma-separated package names", "Choose charging symbol shape")),
+    "package-name fields disable autocorrect suggestions": main.count("TYPE_TEXT_FLAG_NO_SUGGESTIONS") >= 3,
     "app theme choices include system light dark and AMOLED": all(name in main for name in ('"system", "light", "dark", "amoled"', "Follow system", "AMOLED black", "appThemeButton")),
     "secondary charging pill expands independently": "chargePillExpanded" in service and "chargeEta" in service and "chargePillExpanded = !chargePillExpanded" in service,
     "secondary charging pill resets expansion when hidden": "if (!shouldFloat) {" in service and "chargePillExpanded = false" in service,
