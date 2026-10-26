@@ -941,8 +941,10 @@ class MainActivity : Activity() {
                 }
             }.onSuccess {
                 saveMsg.text = "Settings saved to the file."
+                android.widget.Toast.makeText(this, "Settings backup saved", android.widget.Toast.LENGTH_SHORT).show()
             }.onFailure {
-                saveMsg.text = "Could not save: ${it.message}"
+                saveMsg.text = "Could not save: ${it.message ?: "file access error"}"
+                android.widget.Toast.makeText(this, "Settings backup failed", android.widget.Toast.LENGTH_SHORT).show()
             }
         }
         // Restore: ask before applying a settings file over the current configuration.
