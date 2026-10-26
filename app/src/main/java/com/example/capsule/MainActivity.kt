@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
