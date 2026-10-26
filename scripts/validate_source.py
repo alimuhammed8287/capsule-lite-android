@@ -63,6 +63,7 @@ checks = {
     "custom settings saves show confirmation": all(message in main for message in ("Live-activity app list saved", "Quick replies and pinned apps saved", "Hidden-app list saved")),
     "reset to defaults requires explicit confirmation": 'setTitle("Reset all settings?")' in main and 'setNegativeButton("Cancel", null)' in main and 'setPositiveButton("Reset")' in main,
     "settings import rejects empty or unsupported files": "var restoredCount = 0" in main and 'if (restoredCount == 0) error("no supported settings found in this file")' in main and 'else -> error("unsupported value for setting $k")' in main,
+    "settings export reports stream-open and write failures": 'val output = contentResolver.openOutputStream(uri, "wt")' in main and 'error("could not open the selected file for writing")' in main and "stream.flush()" in main,
     "restoring settings requires explicit confirmation": 'setTitle("Restore settings?")' in main and 'setPositiveButton("Restore")' in main and 'setNegativeButton("Cancel", null)' in main and 'Settings restored from the file.' in main,
     "app theme choices include system light dark and AMOLED": all(name in main for name in ('"system", "light", "dark", "amoled"', "Follow system", "AMOLED black", "appThemeButton")),
     "secondary charging pill expands independently": "chargePillExpanded" in service and "chargeEta" in service and "chargePillExpanded = !chargePillExpanded" in service,
