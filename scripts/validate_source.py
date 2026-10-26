@@ -21,8 +21,8 @@ policy = policy_path.read_text() if policy_path.exists() else ""
 main = (ROOT / "app/src/main/java/com/example/capsule/MainActivity.kt").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 checks = {
-    "versionCode 45": bool(re.search(r"versionCode\s*=\s*45\b", build)),
-    "versionName 1.3.7": 'versionName = "1.3.7"' in build,
+    "versionCode 46": bool(re.search(r"versionCode\s*=\s*46\b", build)),
+    "versionName 1.3.8": 'versionName = "1.3.8"' in build,
     "adaptive ticker": "nextTickDelayMs()" in service,
     "screen-aware visualizer": "isInteractive" in service,
     "live activity classification": "fun classify(sbn: StatusBarNotification)" in policy,
@@ -33,7 +33,7 @@ checks = {
     "completion handoff": "finishLiveActivity" in service and "restoreNextLiveActivity" in service,
     "reduced motion setting": '"reduceMotion"' in main and '"reduceMotion"' in service,
     "CI builds debug APK": "assembleDebug" in workflow,
-    "CI artifact v45": "capsule-lite-v45-debug-apk" in workflow,
+    "CI artifact v46": "capsule-lite-v46-debug-apk" in workflow,
     "hybrid charging preference": 'getBoolean("separateChargePill", true)' in service,
     "charging handoff considers active activities": "callActive || showingNotif || mapsShown()" in service,
     "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
@@ -85,7 +85,12 @@ checks = {
     "secondary charging overlay receives touch input": "WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL" in service and "setOnTouchListener { _, event ->" in service,
 
     "secondary charging pill resets expansion when hidden": "if (!shouldFloat) {" in service and "chargePillExpanded = false" in service,
-    "secondary charging pill has coordinated resize and crossfade": "ValueAnimator.ofFloat(0f, 1f)" in service and "detailText.animate().alpha(0f)" in service and "setChargePillExpanded(true)" in service and "setChargePillExpanded(false)" in service,
+    "secondary charging pill uses interruptible damped springs": "chargeSpringW.step(dt, response, 0.82f)" in service and "chargeSpringH.step(dt, response + 0.08f, 0.88f)" in service and "chargeSpringW.target = targetWidth.toFloat()" in service and "chargeSpringH.target = targetHeight.toFloat()" in service,
+    "secondary charging pill animates rounded container and clips content": "chargeSurfaceShape?.cornerRadius" in service and "clipToOutline = true" in service and "chargeWindowIcon" in service,
+    "secondary charging spring respects reduced motion and system scale": "if (!motionEnabled())" in service and "stopChargeSpring()" in service and "\"reduceMotion\"" in service,
+    "secondary charging spring is cleaned up on teardown and hide": "stopChargeSpring()\n        clearSnapshot()" in service and "chargeSurfaceShape = null" in service,
+    "secondary charging pill resize avoids fixed ValueAnimator": "chargeResizeAnimator" not in service and "ValueAnimator.ofFloat(0f, 1f)" not in service,
+    "secondary charging pill has coordinated resize and crossfade": "animateChargeWindowSize(targetWidth, targetHeight)" in service and "detailText.animate().alpha(0f)" in service and "setChargePillExpanded(true)" in service and "setChargePillExpanded(false)" in service,
     "expanded charging pill lays out details across expanded surface": "FrameLayout.LayoutParams.MATCH_PARENT" in service and "if (chargePillExpanded) 1f else 0f" in service,
     "service status only appears in diagnostics": 'if (cat == "setup") col.addView(status)' not in main and "diag.addView(status)" in main,
 }
