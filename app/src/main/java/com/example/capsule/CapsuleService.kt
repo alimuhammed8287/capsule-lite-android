@@ -983,7 +983,7 @@ class CapsuleService : NotificationListenerService() {
                 setOnClickListener { runNotifAction(idx) }
             }
         }
-        miniChargeRing = ChargeRingView(uiCtx) { prefs.getInt("chargeIconStyle", 0) }.apply {
+        miniChargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 0) }).apply {
             layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginStart = dp(8); marginEnd = dp(2) }
             visibility = View.GONE
         }
@@ -2935,7 +2935,7 @@ class CapsuleService : NotificationListenerService() {
         }
         if (chargeRoot == null) {
             val pad = dp(4)
-            val iconView = ChargeRingView(uiCtx) { prefs.getInt("chargeIconStyle", 0) }.apply {
+            val iconView = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 0) }).apply {
                 layoutParams = LinearLayout.LayoutParams(dp(22), dp(22))
             }
             val pct = TextView(uiCtx).apply {
