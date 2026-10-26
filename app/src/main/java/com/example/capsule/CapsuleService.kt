@@ -1758,8 +1758,9 @@ class CapsuleService : NotificationListenerService() {
     }
 
     private fun pillAnimationStyle(): String =
-        (prefs.getString("pillAnimationStyle", "continuity") ?: "continuity")
-            .takeIf { it in setOf("liquid_morph", "continuity", "settling_dock") } ?: "continuity"
+        (prefs.getString("pillAnimationStyle", "continuity") ?: "continuity").let {
+            if (it == "liquid_morph" || it == "continuity" || it == "settling_dock") it else "continuity"
+        }
 
     // Respect the legacy animation switch, reduced motion, and Android's system animator setting.
     // ValueAnimator.areAnimatorsEnabled() is available from API 26; this app supports API 24+.
@@ -1842,6 +1843,8 @@ class CapsuleService : NotificationListenerService() {
         }
         items.forEach { view ->
             view.animate().cancel()
+            blurAnimators.remove(view)?.cancel()
+            if (android.os.Build.VERSION.SDK_INT >= 31) view.setRenderEffect(null)
             if (view.visibility != View.VISIBLE) {
                 view.alpha = 1f
                 view.translationY = 0f
