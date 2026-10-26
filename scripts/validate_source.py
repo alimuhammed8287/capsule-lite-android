@@ -33,7 +33,7 @@ checks = {
     "completion handoff": "finishLiveActivity" in service and "restoreNextLiveActivity" in service,
     "reduced motion setting": '"reduceMotion"' in main and '"reduceMotion"' in service,
     "CI builds debug APK": "assembleDebug" in workflow,
-    "CI artifact v38": "capsule-lite-v38-debug-apk" in workflow,
+    "CI artifact v39": "capsule-lite-v39-debug-apk" in workflow,
     "hybrid charging preference": 'getBoolean("separateChargePill", true)' in service,
     "charging handoff considers active activities": "callActive || showingNotif || mapsShown()" in service,
     "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
