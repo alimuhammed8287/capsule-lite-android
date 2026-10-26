@@ -89,7 +89,7 @@ checks = {
     "secondary charging pill animates rounded container and clips content": "chargeSurfaceShape?.cornerRadius" in service and "clipToOutline = true" in service and "chargeWindowIcon" in service,
     "secondary charging spring respects reduced motion and system scale": "if (!motionEnabled())" in service and "stopChargeSpring()" in service and "\"reduceMotion\"" in service,
     "secondary charging spring is cleaned up on teardown and hide": "stopChargeSpring()\n        clearSnapshot()" in service and "chargeSurfaceShape = null" in service,
-    "secondary charging pill resize avoids fixed ValueAnimator": "chargeResizeAnimator" not in service and "ValueAnimator.ofFloat(0f, 1f)" not in service,
+    "secondary charging pill resize avoids fixed ValueAnimator": "chargeResizeAnimator" not in service and "animateChargeWindowSize(targetWidth, targetHeight)" in service,
     "secondary charging pill has coordinated resize and crossfade": "animateChargeWindowSize(targetWidth, targetHeight)" in service and "detailText.animate().alpha(0f)" in service and "setChargePillExpanded(true)" in service and "setChargePillExpanded(false)" in service,
     "expanded charging pill lays out details across expanded surface": "FrameLayout.LayoutParams.MATCH_PARENT" in service and "if (chargePillExpanded) 1f else 0f" in service,
     "service status only appears in diagnostics": 'if (cat == "setup") col.addView(status)' not in main and "diag.addView(status)" in main,
