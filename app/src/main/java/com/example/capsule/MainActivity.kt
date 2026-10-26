@@ -980,7 +980,9 @@ class MainActivity : Activity() {
                                 is Long -> { edit.putLong(k, v); restoredCount++ }
                                 is Double -> {
                                     if (!v.isFinite()) error("invalid number for $k")
-                                    edit.putFloat(k, v.toFloat())
+                                    val floatValue = v.toFloat()
+                                    if (!floatValue.isFinite()) error("number is out of range for $k")
+                                    edit.putFloat(k, floatValue)
                                     restoredCount++
                                 }
                                 is String -> { edit.putString(k, v); restoredCount++ }
