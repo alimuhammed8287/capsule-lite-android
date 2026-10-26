@@ -21,8 +21,8 @@ policy = policy_path.read_text() if policy_path.exists() else ""
 main = (ROOT / "app/src/main/java/com/example/capsule/MainActivity.kt").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 checks = {
-    "versionCode 41": bool(re.search(r"versionCode\s*=\s*41\b", build)),
-    "versionName 1.3.3": 'versionName = "1.3.3"' in build,
+    "versionCode 41": bool(re.search(r"versionCode\s*=\s*42\b", build)),
+    "versionName 1.3.3": 'versionName = "1.3.4"' in build,
     "adaptive ticker": "nextTickDelayMs()" in service,
     "screen-aware visualizer": "isInteractive" in service,
     "live activity classification": "fun classify(sbn: StatusBarNotification)" in policy,
@@ -33,7 +33,7 @@ checks = {
     "completion handoff": "finishLiveActivity" in service and "restoreNextLiveActivity" in service,
     "reduced motion setting": '"reduceMotion"' in main and '"reduceMotion"' in service,
     "CI builds debug APK": "assembleDebug" in workflow,
-    "CI artifact v41": "capsule-lite-v41-debug-apk" in workflow,
+    "CI artifact v41": "capsule-lite-v42-debug-apk" in workflow,
     "hybrid charging preference": 'getBoolean("separateChargePill", true)' in service,
     "charging handoff considers active activities": "callActive || showingNotif || mapsShown()" in service,
     "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
@@ -58,7 +58,7 @@ checks = {
     "One UI-inspired home typography and cards": "textSize = 26f" in main and "cornerRadius = dp(24).toFloat()" in main,
     "settings sections have redesigned hierarchy and descriptions": "private fun sectionDescription(title: String)" in main and "text = sectionDescription(title)" in main and "textSize = 15.5f" in main and "bottomMargin = dp(7)" in main,
     "settings redesign has per-section guidance": all(label in main for label in ("Service health, recent events, and troubleshooting details.", "Choose the appearance of the Capsule Lite settings screens.", "Use a translucent layered look with a safe fallback on unsupported devices.")),
-    "settings header shows current redesign version": "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE" in main and "V1.3.3" in main,
+    "settings header shows current redesign version": "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE" in main and "V1.3.4" in main,
     "home tiles have accessible spoken descriptions": 'contentDescription = "$title. $subtitle"' in main and "isFocusable = true" in main,
     "home tile navigation arrows keep light-theme contrast": 'setTextColor(if (isLightAppTheme()) 0xFF64748B.toInt() else 0xFF8CA2B8.toInt())' in main,
     "slider accessibility announces its current value": 'contentDescription = "$label: $start"' in main and 'sb.contentDescription = "$label: $value"' in main,
