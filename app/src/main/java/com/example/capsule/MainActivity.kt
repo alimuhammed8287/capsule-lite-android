@@ -495,7 +495,14 @@ class MainActivity : Activity() {
     }
 
     private fun buildLook() {
-        val look = card("Appearance")
+        val appTheme = card("App theme")
+        appThemeButton(appTheme)
+        appTheme.addView(TextView(this).apply {
+            text = "Light, Dark, AMOLED black, or follow your phone system theme."
+            textSize = 12f
+            setTextColor(0xFF9AAABD.toInt())
+        })
+        val look = card("Pill appearance")
         themePreview(look)
         fontButton(look)
         themeButton(look)
@@ -669,6 +676,21 @@ class MainActivity : Activity() {
         parent.addView(b)
     }
 
+    private fun appThemeButton(parent: LinearLayout) {
+        val themes = listOf("system", "light", "dark", "amoled")
+        val names = listOf("Follow system", "Light", "Dark", "AMOLED black")
+        fun selectedTheme() = (prefs.getString("appTheme", "dark") ?: "dark").takeIf { it in themes } ?: "dark"
+        val b = styledButton().apply { text = "App theme: " + names[themes.indexOf(selectedTheme()).coerceAtLeast(0)] }
+        b.setOnClickListener {
+            AlertDialog.Builder(this).setTitle("App theme")
+                .setSingleChoiceItems(names.toTypedArray(), themes.indexOf(selectedTheme()).coerceAtLeast(0)) { dialog, which ->
+                    prefs.edit().putString("appTheme", themes[which]).apply()
+                    dialog.dismiss()
+                    recreate()
+                }.setNegativeButton("Cancel", null).show()
+        }
+        parent.addView(b)
+    }
     private fun themePreview(parent: LinearLayout) {
         val current = prefs.getString("theme", "black") ?: "black"
         val (bg, stroke, glow) = when (current) {
