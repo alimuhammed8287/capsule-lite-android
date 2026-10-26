@@ -3068,6 +3068,22 @@ class CapsuleService : NotificationListenerService() {
             "toggle" -> {
                 chargePillExpanded = !chargePillExpanded
                 updateSeparateChargingPill()
+                chargeWindow?.let { content ->
+                    content.animate().cancel()
+                    if (motionEnabled()) {
+                        content.alpha = 0.82f
+                        content.scaleX = 0.88f
+                        content.scaleY = 0.88f
+                        content.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                            .setDuration(240)
+                            .setInterpolator(android.view.animation.OvershootInterpolator(0.75f))
+                            .start()
+                    } else {
+                        content.alpha = 1f
+                        content.scaleX = 1f
+                        content.scaleY = 1f
+                    }
+                }
             }
             else -> Unit
         }
