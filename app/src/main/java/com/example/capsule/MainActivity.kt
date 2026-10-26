@@ -966,17 +966,24 @@ class MainActivity : Activity() {
                         val json = JSONObject(text)
                         val edit = prefs.edit()
                         val keys = json.keys()
+                        var restoredCount = 0
                         while (keys.hasNext()) {
                             val k = keys.next()
                             if (k == "diag" || k == "testPill") continue
                             when (val v = json.get(k)) {
-                                is Boolean -> edit.putBoolean(k, v)
-                                is Int -> edit.putInt(k, v)
-                                is Long -> edit.putLong(k, v)
-                                is Double -> edit.putFloat(k, v.toFloat())
-                                is String -> edit.putString(k, v)
+                                is Boolean -> { edit.putBoolean(k, v); restoredCount++ }
+                                is Int -> { edit.putInt(k, v); restoredCount++ }
+                                is Long -> { edit.putLong(k, v); restoredCount++ }
+                                is Double -> {
+                                    if (!v.isFinite()) error("invalid number for $k")
+                                    edit.putFloat(k, v.toFloat())
+                                    restoredCount++
+                                }
+                                is String -> { edit.putString(k, v); restoredCount++ }
+                                else -> error("unsupported value for setting $k")
                             }
                         }
+                        if (restoredCount == 0) error("no supported settings found in this file")
                         edit.apply()
                     }.onSuccess {
                         saveMsg.text = "Settings restored from the file."
