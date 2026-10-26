@@ -128,8 +128,12 @@ class MainActivity : Activity() {
             }
         })
         if (cat != null) button(col, "Back") { finish() }
-        status = TextView(this).apply { textSize = 14f }
-        col.addView(status)
+        status = TextView(this).apply {
+            textSize = 14f
+            setTextColor(0xFFE7EDF5.toInt())
+            setPadding(dp(2), dp(4), dp(2), dp(8))
+        }
+        if (cat == "setup") col.addView(status)
 
         when (cat) {
             null -> buildHome()
@@ -410,7 +414,11 @@ class MainActivity : Activity() {
         toggle(charge, "Charging alerts (when the charge reaches a level, or is full)", "chargeAlert", true)
         slider(charge, "Alert at charge (%)", "chargeAlertAt", 50, 100, 80)
         slider(charge, "Height: charging", "expH_charge", 40, 120, 64)
+        slider(charge, "Separate pill width", "chargeMiniW", 76, 150, 100)
+        slider(charge, "Separate pill height", "chargeMiniH", 34, 64, 42)
+        slider(charge, "Separate pill vertical offset", "chargeMiniYOffset", -80, 120, 0)
         chargingStyleButton(charge)
+        chargingIconButton(charge)
     }
 
     private fun chargingStyleButton(parent: LinearLayout) {
@@ -426,6 +434,24 @@ class MainActivity : Activity() {
                 .setSingleChoiceItems(styles.toTypedArray(), current()) { dialog, which ->
                     prefs.edit().putInt("chargeIconStyle", which).apply()
                     b.text = "Charging icon: " + styles[which]
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        parent.addView(b)
+    }
+
+    private fun chargingIconButton(parent: LinearLayout) {
+        val icons = listOf("Battery", "Lightning bolt", "Power plug", "Leaf", "Spark")
+        fun selected() = prefs.getInt("chargeIconShape", 0).coerceIn(0, icons.lastIndex)
+        val b = styledButton().apply { text = "Charging symbol: " + icons[selected()] }
+        b.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Charging symbol")
+                .setSingleChoiceItems(icons.toTypedArray(), selected()) { dialog, which ->
+                    prefs.edit().putInt("chargeIconShape", which).apply()
+                    b.text = "Charging symbol: " + icons[which]
                     dialog.dismiss()
                 }
                 .setNegativeButton("Cancel", null)
