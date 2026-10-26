@@ -388,6 +388,7 @@ class MainActivity : Activity() {
         val liveApps = EditText(this).apply {
             hint = "Optional live-activity allow-list (package names, comma separated; blank = all apps)"
             contentDescription = "Live-activity app allow-list, comma-separated package names"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             setText(prefs.getString("liveActivityApps", ""))
             setTextColor(primaryTextColor())
             setHintTextColor(secondaryTextColor())
@@ -430,6 +431,7 @@ class MainActivity : Activity() {
         val pinField = EditText(this).apply {
             hint = "Pinned apps, package names, comma separated (up to 4)"
             contentDescription = "Pinned app package names, comma-separated, up to four"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             setText(prefs.getString("pinned", ""))
             setTextColor(primaryTextColor())
             setHintTextColor(secondaryTextColor())
@@ -578,6 +580,7 @@ class MainActivity : Activity() {
         val blockField = EditText(this).apply {
             hint = "Hide notifications from these apps (package names, comma separated)"
             contentDescription = "Apps whose notifications should be hidden, comma-separated package names"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             setText(prefs.getString("blockedApps", ""))
             setTextColor(primaryTextColor())
             setHintTextColor(secondaryTextColor())
