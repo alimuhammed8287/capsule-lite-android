@@ -56,7 +56,7 @@ class MainActivity : Activity() {
 
     // Rounded, translucent buttons used across the settings screen
     private fun styledButton() = Button(this).apply {
-        setTextColor(0xFFF2F6FC.toInt())
+        setTextColor(primaryTextColor())
         textSize = 14f
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         isAllCaps = false
@@ -64,10 +64,12 @@ class MainActivity : Activity() {
         stateListAnimator = null
         background = GradientDrawable(
             GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(0xFF203244.toInt(), 0xFF121C28.toInt())
+            if (isLightAppTheme()) intArrayOf(0xFFE9EEF4.toInt(), 0xFFDDE5EE.toInt())
+            else if (appTheme() == "amoled") intArrayOf(0xFF080808.toInt(), Color.BLACK)
+            else intArrayOf(0xFF203244.toInt(), 0xFF121C28.toInt())
         ).apply {
             cornerRadius = dp(16).toFloat()
-            setStroke(dp(1), 0x334DDDB0)
+            setStroke(dp(1), if (isLightAppTheme()) 0xFFCBD5E1.toInt() else if (appTheme() == "amoled") 0xFF303030.toInt() else 0x334DDDB0)
         }
         setPadding(dp(15), dp(11), dp(15), dp(11))
         layoutParams = LinearLayout.LayoutParams(
@@ -521,7 +523,8 @@ class MainActivity : Activity() {
         appTheme.addView(TextView(this).apply {
             text = "Light, Dark, AMOLED black, or follow your phone system theme."
             textSize = 12f
-            setTextColor(0xFF9AAABD.toInt())
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(5), dp(2), dp(2))
         })
         val look = card("Pill appearance")
         themePreview(look)
@@ -539,7 +542,7 @@ class MainActivity : Activity() {
         blur.addView(TextView(this).apply {
             text = "Uses a layered, translucent pill surface without blurring the rest of your screen. True background blur clipped exactly to the pill is not enabled because some Xiaomi/HyperOS versions blur outside the pill shape."
             textSize = 12f
-            setTextColor(0xFF9DA6B5.toInt())
+            setTextColor(secondaryTextColor())
             setPadding(dp(2), dp(6), dp(2), dp(2))
         })
 
@@ -618,7 +621,7 @@ class MainActivity : Activity() {
             textSize = 11f
             letterSpacing = 0.09f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setTextColor(0xFF76DDF4.toInt())
+            setTextColor(if (isLightAppTheme()) 0xFF187D70.toInt() else 0xFF76DDF4.toInt())
             setPadding(0, 0, 0, dp(8))
         })
         col.addView(box)
@@ -636,7 +639,7 @@ class MainActivity : Activity() {
         parent.addView(Switch(this).apply {
             text = label
             textSize = 14f
-            setTextColor(0xFFE7EDF5.toInt())
+            setTextColor(primaryTextColor())
             minHeight = dp(52)
             setPadding(dp(2), dp(8), dp(2), dp(8))
             isChecked = prefs.getBoolean(key, default)
