@@ -387,6 +387,7 @@ class MainActivity : Activity() {
         toggle(shown, "Live timer and stopwatch notifications", "liveActivities", true)
         val liveApps = EditText(this).apply {
             hint = "Optional live-activity allow-list (package names, comma separated; blank = all apps)"
+            contentDescription = "Live-activity app allow-list, comma-separated package names"
             setText(prefs.getString("liveActivityApps", ""))
             setTextColor(primaryTextColor())
             setHintTextColor(secondaryTextColor())
@@ -420,6 +421,7 @@ class MainActivity : Activity() {
         val custom = card("Pinned apps and quick replies")
         val replyField = EditText(this).apply {
             hint = "Quick replies, comma separated (up to 3)"
+            contentDescription = "Quick reply messages, comma-separated, up to three"
             setText(prefs.getString("replies", "Yes,Later,Busy"))
             setTextColor(primaryTextColor())
             setHintTextColor(secondaryTextColor())
@@ -427,6 +429,7 @@ class MainActivity : Activity() {
         custom.addView(replyField)
         val pinField = EditText(this).apply {
             hint = "Pinned apps, package names, comma separated (up to 4)"
+            contentDescription = "Pinned app package names, comma-separated, up to four"
             setText(prefs.getString("pinned", ""))
             setTextColor(primaryTextColor())
             setHintTextColor(secondaryTextColor())
@@ -511,7 +514,10 @@ class MainActivity : Activity() {
     private fun chargingIconButton(parent: LinearLayout) {
         val icons = listOf("Battery", "Lightning bolt", "Power plug", "Leaf", "Spark")
         fun selected() = prefs.getInt("chargeIconShape", 0).coerceIn(0, icons.lastIndex)
-        val b = styledButton().apply { text = "Charging symbol: " + icons[selected()] }
+        val b = styledButton().apply {
+            text = "Charging symbol: " + icons[selected()]
+            contentDescription = "Choose charging symbol shape"
+        }
         b.setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Charging symbol")
@@ -571,6 +577,7 @@ class MainActivity : Activity() {
         toggle(privacy, "Keep notification history on this phone (off by default)", "historyOn", false)
         val blockField = EditText(this).apply {
             hint = "Hide notifications from these apps (package names, comma separated)"
+            contentDescription = "Apps whose notifications should be hidden, comma-separated package names"
             setText(prefs.getString("blockedApps", ""))
             setTextColor(primaryTextColor())
             setHintTextColor(secondaryTextColor())
