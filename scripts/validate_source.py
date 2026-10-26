@@ -21,8 +21,8 @@ policy = policy_path.read_text() if policy_path.exists() else ""
 main = (ROOT / "app/src/main/java/com/example/capsule/MainActivity.kt").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 checks = {
-    "versionCode 39": bool(re.search(r"versionCode\s*=\s*39\b", build)),
-    "versionName 1.3.1": 'versionName = "1.3.1"' in build,
+    "versionCode 39": bool(re.search(r"versionCode\s*=\s*40\b", build)),
+    "versionName 1.3.1": 'versionName = "1.3.2"' in build,
     "adaptive ticker": "nextTickDelayMs()" in service,
     "screen-aware visualizer": "isInteractive" in service,
     "live activity classification": "fun classify(sbn: StatusBarNotification)" in policy,
@@ -33,7 +33,7 @@ checks = {
     "completion handoff": "finishLiveActivity" in service and "restoreNextLiveActivity" in service,
     "reduced motion setting": '"reduceMotion"' in main and '"reduceMotion"' in service,
     "CI builds debug APK": "assembleDebug" in workflow,
-    "CI artifact v39": "capsule-lite-v39-debug-apk" in workflow,
+    "CI artifact v39": "capsule-lite-v40-debug-apk" in workflow,
     "hybrid charging preference": 'getBoolean("separateChargePill", true)' in service,
     "charging handoff considers active activities": "callActive || showingNotif || mapsShown()" in service,
     "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
@@ -70,6 +70,7 @@ checks = {
     "tools explain backup compatibility and restore confirmation": "Settings backups use a versioned JSON format." in main and "Older backups are supported; restore asks before changing your current settings." in main,
     "restoring settings requires explicit confirmation": 'setTitle("Restore settings?")' in main and 'setPositiveButton("Restore")' in main and 'setNegativeButton("Cancel", null)' in main and 'Settings restored from the file.' in main,
     "restore confirmation explains merge behavior": "Settings in this file will overwrite matching Capsule Lite choices." in main and "Settings not included in the file will remain unchanged." in main,
+    "settings restore failures show feedback": 'saveMsg.text = "Could not restore: ${it.message ?: "invalid settings file"}"' in main and 'Toast.makeText(this, "Settings restore failed"' in main,
     "app theme choices include system light dark and AMOLED": all(name in main for name in ('"system", "light", "dark", "amoled"', "Follow system", "AMOLED black", "appThemeButton")),
     "secondary charging pill expands independently": "chargePillExpanded" in service and "chargeEta" in service and "chargePillExpanded = !chargePillExpanded" in service,
     "secondary charging pill resets expansion when hidden": "if (!shouldFloat) {" in service and "chargePillExpanded = false" in service,
