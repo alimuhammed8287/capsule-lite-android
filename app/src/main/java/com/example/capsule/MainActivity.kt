@@ -553,7 +553,7 @@ class MainActivity : Activity() {
         val styles = listOf("Liquid battery", "Segmented battery", "Pulse battery")
         fun current() = prefs.getInt("chargeIconStyle", 0).coerceIn(0, styles.lastIndex)
         val b = styledButton().apply {
-            text = "Charging icon: " + styles[current()]
+            text = "Charging animation: " + styles[current()]
             contentDescription = "Choose charging animation"
         }
         b.setOnClickListener {
@@ -561,7 +561,7 @@ class MainActivity : Activity() {
                 .setTitle("Charging animation")
                 .setSingleChoiceItems(styles.toTypedArray(), current()) { dialog, which ->
                     prefs.edit().putInt("chargeIconStyle", which).apply()
-                    b.text = "Charging icon: " + styles[which]
+                    b.text = "Charging animation: " + styles[which]
                     dialog.dismiss()
                 }
                 .setNegativeButton("Cancel", null)
