@@ -552,6 +552,12 @@ class MainActivity : Activity() {
             setTextColor(secondaryTextColor())
             setPadding(dp(2), dp(2), dp(2), dp(6))
         }.also { gestures.addView(it) }
+        TextView(this).apply {
+            text = "Tip: swipe down on the separate charging pill to expand it, then swipe up to collapse it. The battery icon stays anchored while the details crossfade."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(2), dp(2), dp(8))
+        }.also { gestures.addView(it) }
         chargeGestureButton(gestures, "chargePillTap", "Single tap")
         chargeGestureButton(gestures, "chargePillDoubleTap", "Double tap")
         chargeGestureButton(gestures, "chargePillLongPress", "Long press")
