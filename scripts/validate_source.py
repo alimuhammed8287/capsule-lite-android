@@ -57,6 +57,7 @@ checks = {
     "home tiles have accessible spoken descriptions": 'contentDescription = "$title. $subtitle"' in main and "isFocusable = true" in main,
     "home tile navigation arrows keep light-theme contrast": 'setTextColor(if (isLightAppTheme()) 0xFF64748B.toInt() else 0xFF8CA2B8.toInt())' in main,
     "slider accessibility announces its current value": 'contentDescription = "$label: $start"' in main and 'sb.contentDescription = "$label: $value"' in main,
+    "editable fields follow selected app theme": main.count("setHintTextColor(secondaryTextColor())") >= 4 and main.count("setTextColor(primaryTextColor())") >= 4,
     "app theme choices include system light dark and AMOLED": all(name in main for name in ('"system", "light", "dark", "amoled"', "Follow system", "AMOLED black", "appThemeButton")),
     "secondary charging pill expands independently": "chargePillExpanded" in service and "chargeEta" in service and "chargePillExpanded = !chargePillExpanded" in service,
     "secondary charging pill resets expansion when hidden": "if (!shouldFloat) {" in service and "chargePillExpanded = false" in service,
