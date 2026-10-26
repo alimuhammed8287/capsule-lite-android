@@ -34,6 +34,12 @@ checks = {
     "reduced motion setting": '"reduceMotion"' in main and '"reduceMotion"' in service,
     "CI builds debug APK": "assembleDebug" in workflow,
     "CI artifact v38": "capsule-lite-v38-debug-apk" in workflow,
+    "hybrid charging preference": 'getBoolean("separateChargePill", true)' in service,
+    "charging handoff considers active activities": "callActive || showingNotif || mapsShown()" in service,
+    "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
+    "secondary charging pill screen clamp": "screenH - dp(54)" in service and "secondaryChargeY()" in service,
+    "settings switches have readable touch targets": "minHeight = dp(52)" in main and "setTextColor(0xFFE7EDF5.toInt())" in main,
+    "frosted glass avoids whole-window blur": "FLAG_BLUR_BEHIND" not in service and "translucent, bordered surface" in service,
 }
 for label, ok in checks.items():
     print(f"{'PASS' if ok else 'FAIL'}: {label}")
