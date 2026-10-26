@@ -959,7 +959,7 @@ class MainActivity : Activity() {
             val uri = data?.data ?: return
             AlertDialog.Builder(this)
                 .setTitle("Restore settings?")
-                .setMessage("Settings in this file will be applied to Capsule Lite and may replace your current choices. Export your current settings first if you want a backup.")
+                .setMessage("Settings in this file will overwrite matching Capsule Lite choices. Settings not included in the file will remain unchanged. Export your current settings first if you want a backup.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Restore") { _, _ ->
                     runCatching {
