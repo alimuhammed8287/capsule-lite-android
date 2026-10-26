@@ -81,6 +81,12 @@ class CapsuleService : NotificationListenerService() {
 
     private var root: View? = null          // transparent window view (includes the tap margin)
     private var pill: LinearLayout? = null  // the black pill inside it
+    // Charging moves into its own small overlay only while another activity owns the main pill.
+    private var chargeRoot: View? = null
+    private var chargeWindow: LinearLayout? = null
+    private var chargeWindowLp: WindowManager.LayoutParams? = null
+    private var chargeWindowIcon: View? = null
+    private var chargeWindowText: TextView? = null
 
     private lateinit var miniText: TextView
     private lateinit var miniRight: TextView          // collapsed charging pill: the percentage, right of the camera hole
@@ -496,6 +502,12 @@ class CapsuleService : NotificationListenerService() {
         controller?.unregisterCallback(controllerCallback)
         controller = null
         runCatching { msm?.removeOnActiveSessionsChangedListener(sessionsListener) }
+        chargeRoot?.let { v -> runCatching { wm.removeView(v) } }
+        chargeRoot = null
+        chargeWindow = null
+        chargeWindowLp = null
+        chargeWindowIcon = null
+        chargeWindowText = null
         root?.let { v -> runCatching { wm.removeView(v) } }
         root = null
         pill = null
@@ -2866,8 +2878,95 @@ class CapsuleService : NotificationListenerService() {
 
     private fun vis(on: Boolean) = if (on) View.VISIBLE else View.GONE
 
+    // If another live activity needs the main pill, move charging into a secondary pill.
+    // When the main pill is otherwise idle, remove the secondary window and show charging in-place.
+    private fun updateSeparateChargingPill() {
+        val activeActivity = callActive || showingNotif || mapsShown() ||
+            (controller != null && showMusic()) || qsActive() || widgetActive() ||
+            (expanded && !chargeExpandedShown())
+        val shouldFloat = showCharging() && charging && activeActivity
+        if (!shouldFloat) {
+            chargeRoot?.let { v -> runCatching { wm.removeView(v) } }
+            chargeRoot = null
+            chargeWindow = null
+            chargeWindowLp = null
+            chargeWindowIcon = null
+            chargeWindowText = null
+            return
+        }
+        if (chargeRoot == null) {
+            val pad = dp(4)
+            val iconView = ChargeRingView(uiCtx) { prefs.getInt("chargeIconStyle", 0) }.apply {
+                layoutParams = LinearLayout.LayoutParams(dp(22), dp(22))
+            }
+            val pct = TextView(uiCtx).apply {
+                text = "$chargePct%"
+                textSize = 12f
+                setTextColor(Color.WHITE)
+                setTypeface(typeface, Typeface.BOLD)
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(7), 0, dp(10), 0)
+            }
+            val content = LinearLayout(uiCtx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(5), dp(5), dp(5))
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.TL_BR,
+                    intArrayOf(0xF0263444.toInt(), 0xF0121924.toInt())
+                ).apply {
+                    cornerRadius = dp(22).toFloat()
+                    setStroke(dp(1), 0x6657DDB0)
+                }
+                elevation = dp(8).toFloat()
+                addView(iconView)
+                addView(pct)
+                setOnClickListener { openBatteryScreen() }
+            }
+            val window = FrameLayout(uiCtx).apply {
+                setPadding(pad, pad, pad, pad)
+                addView(content, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER
+                ))
+            }
+            val wlp = WindowManager.LayoutParams(
+                dp(100), dp(42),
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                x = offX
+                y = topY + miniH + dp(8)
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
+            chargeRoot = window
+            chargeWindow = content
+            chargeWindowLp = wlp
+            chargeWindowIcon = iconView
+            chargeWindowText = pct
+            runCatching { wm.addView(window, wlp) }.onFailure {
+                diag("charging pill: could not attach secondary overlay: ${it.javaClass.simpleName}")
+                chargeRoot = null
+                chargeWindow = null
+                chargeWindowLp = null
+            }
+        }
+        chargeWindowText?.text = "$chargePct%"
+        chargeWindowLp?.let { wlp ->
+            wlp.x = offX
+            wlp.y = topY + miniH + dp(8)
+            chargeRoot?.let { v -> runCatching { wm.updateViewLayout(v, wlp) } }
+        }
+    }
+
     private fun applyVisibility() {
         if (pill == null) return
+        updateSeparateChargingPill()
         val qsOn = qsActive()
         val inner = targetInnerH()
         val mapsWide = !expanded && (mapsShown() || callCompact())
