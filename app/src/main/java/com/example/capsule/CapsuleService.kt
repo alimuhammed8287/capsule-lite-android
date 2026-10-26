@@ -2970,8 +2970,10 @@ class CapsuleService : NotificationListenerService() {
                     Gravity.CENTER
                 ))
             }
+            val chargeWidth = dp(prefs.getInt("chargeMiniW", 100).coerceIn(76, 150))
+            val chargeHeight = dp(prefs.getInt("chargeMiniH", 42).coerceIn(34, 64))
             val wlp = WindowManager.LayoutParams(
-                dp(100), dp(42),
+                chargeWidth, chargeHeight,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -2979,7 +2981,7 @@ class CapsuleService : NotificationListenerService() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                x = resolvedOffX
+                x = secondaryChargeX(chargeWidth)
                 y = secondaryChargeY()
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             }
@@ -2997,17 +2999,30 @@ class CapsuleService : NotificationListenerService() {
         }
         chargeWindowText?.text = "$chargePct%"
         chargeWindowLp?.let { wlp ->
-            wlp.x = resolvedOffX
+            wlp.width = dp(prefs.getInt("chargeMiniW", 100).coerceIn(76, 150))
+            wlp.height = dp(prefs.getInt("chargeMiniH", 42).coerceIn(34, 64))
+            wlp.x = secondaryChargeX(wlp.width)
             wlp.y = secondaryChargeY()
             chargeRoot?.let { v -> runCatching { wm.updateViewLayout(v, wlp) } }
         }
     }
 
+    // Center-horizontal overlay offsets are relative to screen center. Place the charge pill
+    // beside the right edge of the main compact pill, not underneath it.
+    private fun secondaryChargeX(chargeWidth: Int): Int {
+        val screenW = resources.displayMetrics.widthPixels
+        val desired = resolvedOffX + dp(prefs.getInt("miniW", 100).coerceIn(40, 200)) / 2 +
+            dp(8) + chargeWidth / 2
+        val maxOffset = (screenW - chargeWidth) / 2
+        return desired.coerceIn(-maxOffset, maxOffset)
+    }
+
     private fun secondaryChargeY(): Int {
         val mainHeight = if (expanded) targetInnerH() else miniH
-        val desired = resolvedTopY + mainHeight + dp(12)
+        val offset = dp(prefs.getInt("chargeMiniYOffset", 0).coerceIn(-80, 120))
+        val desired = resolvedTopY + mainHeight / 2 + offset
         val screenH = resources.displayMetrics.heightPixels
-        return desired.coerceAtMost((screenH - dp(54)).coerceAtLeast(dp(8)))
+        return desired.coerceIn(dp(8), (screenH - dp(54)).coerceAtLeast(dp(8)))
     }
 
     private fun applyVisibility() {
