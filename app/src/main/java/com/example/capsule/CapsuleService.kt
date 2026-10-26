@@ -3505,9 +3505,9 @@ class CapsuleService : NotificationListenerService() {
         applyVisibility()
     }
 
-    // Collapsed navigation text: the distance to the next turn. The ETA sits on the other side of the camera hole.
+    // Collapsed navigation text prioritises remaining route distance; next-turn distance is the fallback.
     // In the collapsed pill, prioritise total trip distance (for example, "12 km") over the short distance to the next maneuver. Fall back to turn distance if Maps has not exposed a trip distance yet.
-    private fun mapsMiniText(): String = MapsNav.turnDistance.ifEmpty { MapsNav.distanceLeft.ifEmpty { MapsNav.eta.ifEmpty { "Maps" } } }
+    private fun mapsMiniText(): String = MapsNav.distanceLeft.ifEmpty { MapsNav.turnDistance.ifEmpty { MapsNav.eta.ifEmpty { "Maps" } } }
 
     private fun navArrowRes(dir: String): Int = when (dir) {
         "left" -> R.drawable.ic_nav_left
