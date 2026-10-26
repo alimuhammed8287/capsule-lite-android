@@ -108,10 +108,10 @@ class MainActivity : Activity() {
                 }
                 addView(TextView(this@MainActivity).apply {
                     text = if (cat == null) "Capsule Lite" else titles[cat] ?: "Settings"
-                    textSize = 22f
+                    textSize = 26f
                     setTextColor(Color.WHITE)
                     setTypeface(Typeface.create("sans-serif", Typeface.BOLD))
-                    letterSpacing = -0.02f
+                    letterSpacing = -0.035f
                 })
                 addView(TextView(this@MainActivity).apply {
                     text = if (cat == null) "FLOATING COMPANION  ·  V1.3" else "PERSONALISE YOUR EXPERIENCE"
@@ -208,14 +208,14 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(13), dp(12), dp(13))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF1B2A39.toInt(), 0xFF111A26.toInt())
+                intArrayOf(0xFF1A2430.toInt(), 0xFF121A24.toInt())
             ).apply {
-                cornerRadius = dp(20).toFloat()
-                setStroke(dp(1), 0xFF30485B.toInt())
+                cornerRadius = dp(24).toFloat()
+                setStroke(dp(1), 0xFF2A3948.toInt())
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(9) }
+            ).apply { topMargin = dp(11) }
             isClickable = true
             isFocusable = true
             setOnClickListener { open(destination) }
@@ -573,10 +573,10 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF1C2937.toInt(), 0xFF111923.toInt())
+                intArrayOf(0xFF192431.toInt(), 0xFF121A24.toInt())
             ).apply {
-                cornerRadius = dp(22).toFloat()
-                setStroke(dp(1), 0xFF34495B.toInt())
+                cornerRadius = dp(24).toFloat()
+                setStroke(dp(1), 0xFF2B3B4B.toInt())
             }
             elevation = dp(2).toFloat()
             setPadding(dp(16), dp(15), dp(16), dp(16))
