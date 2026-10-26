@@ -2884,7 +2884,7 @@ class CapsuleService : NotificationListenerService() {
         val activeActivity = callActive || showingNotif || mapsShown() ||
             (controller != null && showMusic()) || qsActive() || widgetActive() ||
             (expanded && !chargeExpandedShown())
-        val shouldFloat = showCharging() && charging && activeActivity
+        val shouldFloat = showCharging() && prefs.getBoolean("separateChargePill", true) && charging && activeActivity
         if (!shouldFloat) {
             chargeRoot?.let { v -> runCatching { wm.removeView(v) } }
             chargeRoot = null
