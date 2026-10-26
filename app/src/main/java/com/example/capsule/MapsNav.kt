@@ -167,6 +167,7 @@ object MapsNav {
         var d = ""
         var t = ""
         var turnIndex = -1
+        val parsedDistances = mutableListOf<String>()
         for ((i, y) in items.withIndex()) {
             val lm = leftRe.matchEntire(y)
             if (lm != null && d.isEmpty()) {
@@ -182,14 +183,19 @@ object MapsNav {
                 a = y
                 continue
             }
-            if (t.isEmpty() && turnRe.matchEntire(y) != null) {
-                t = y
-                turnIndex = i
+            if (turnRe.matchEntire(y) != null) {
+                parsedDistances.add(y)
+                if (t.isEmpty()) {
+                    t = y
+                    turnIndex = i
+                } else if (d.isEmpty()) {
+                    // Maps may expose trip distance as a standalone value rather than "distance • arrival".
+                    d = y
+                }
                 continue
             }
-            // In the notification the trip distance is the second distance, often split from the arrival time
-            if (source == "notification" && d.isEmpty() && t.isNotEmpty() && turnRe.matchEntire(y) != null) d = y
         }
+        if (d.isEmpty() && parsedDistances.size > 1) d = parsedDistances[1]
         // The street is the first readable text after the turn distance
         var s = ""
         if (turnIndex >= 0) {
