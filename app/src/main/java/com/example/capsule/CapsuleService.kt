@@ -1028,8 +1028,14 @@ class CapsuleService : NotificationListenerService() {
         val glass = prefs.getBoolean("blur", false)
         when (prefs.getString("theme", "black")) {
             "frosted" -> {
-                setColor(surfaceColor(0x222226, 0xD9, glass))
-                setStroke(dp(1), 0x66FFFFFF)
+                // Layered tint and a bright top edge create a glass-like pill without
+                // asking Android to blur the entire window behind this overlay.
+                orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                colors = intArrayOf(
+                    surfaceColor(0x343B49, 0xB8, glass),
+                    surfaceColor(0x171C27, 0xC8, glass)
+                )
+                setStroke(dp(1), 0x88FFFFFF.toInt())
             }
             "futuristic" -> {
                 orientation = GradientDrawable.Orientation.TOP_BOTTOM
