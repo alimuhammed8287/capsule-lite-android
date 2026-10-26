@@ -927,6 +927,8 @@ class MainActivity : Activity() {
             val uri = data?.data ?: return
             runCatching {
                 val json = JSONObject()
+                json.put("_capsuleLiteBackupVersion", 1)
+                json.put("_capsuleLiteExportedAt", System.currentTimeMillis())
                 for ((k, v) in prefs.all) {
                     if (k == "diag" || k == "testPill") continue
                     json.put(k, v)
@@ -968,12 +970,17 @@ class MainActivity : Activity() {
                             }
                         } ?: error("could not open the file")
                         val json = JSONObject(text)
+                        if (json.has("_capsuleLiteBackupVersion")) {
+                            val backupVersion = json.optInt("_capsuleLiteBackupVersion", -1)
+                            if (backupVersion != 1) error("unsupported backup version: $backupVersion")
+                        }
                         val edit = prefs.edit()
                         val keys = json.keys()
                         var restoredCount = 0
                         while (keys.hasNext()) {
                             val k = keys.next()
-                            if (k == "diag" || k == "testPill") continue
+                            if (k == "diag" || k == "testPill" ||
+                                k == "_capsuleLiteBackupVersion" || k == "_capsuleLiteExportedAt") continue
                             when (val v = json.get(k)) {
                                 is Boolean -> { edit.putBoolean(k, v); restoredCount++ }
                                 is Int -> { edit.putInt(k, v); restoredCount++ }
