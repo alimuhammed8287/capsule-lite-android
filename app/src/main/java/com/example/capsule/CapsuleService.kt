@@ -3050,7 +3050,17 @@ class CapsuleService : NotificationListenerService() {
             } else "$chargePct%"
             textSize = if (chargePillExpanded) 10.5f else 12f
             maxLines = if (chargePillExpanded) 2 else 1
+            layoutParams = LinearLayout.LayoutParams(
+                if (chargePillExpanded) 0 else LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                if (chargePillExpanded) 1f else 0f
+            ).apply { if (chargePillExpanded) marginStart = dp(6) }
         }
+        chargeWindow?.layoutParams = FrameLayout.LayoutParams(
+            if (chargePillExpanded) FrameLayout.LayoutParams.MATCH_PARENT else FrameLayout.LayoutParams.WRAP_CONTENT,
+            if (chargePillExpanded) FrameLayout.LayoutParams.MATCH_PARENT else FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER
+        )
         chargeWindowLp?.let { wlp ->
             val baseWidth = dp(prefs.getInt("chargeMiniW", 100).coerceIn(76, 150))
             val baseHeight = dp(prefs.getInt("chargeMiniH", 42).coerceIn(34, 64))
