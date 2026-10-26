@@ -2925,12 +2925,26 @@ class CapsuleService : NotificationListenerService() {
             (expanded && !chargeExpandedShown())
         val shouldFloat = showCharging() && prefs.getBoolean("separateChargePill", true) && charging && activeActivity
         if (!shouldFloat) {
-            chargeRoot?.let { v -> runCatching { wm.removeView(v) } }
+            val oldRoot = chargeRoot
+            val oldContent = chargeWindow
             chargeRoot = null
             chargeWindow = null
             chargeWindowLp = null
             chargeWindowIcon = null
             chargeWindowText = null
+            if (oldRoot != null && oldContent != null && motionEnabled()) {
+                oldContent.animate().cancel()
+                oldContent.animate()
+                    .alpha(0f).scaleX(0.78f).scaleY(0.78f)
+                    .setDuration(150)
+                    .setInterpolator(android.view.animation.AccelerateInterpolator())
+                    .withEndAction {
+                        runCatching { if (oldRoot.isAttachedToWindow) wm.removeView(oldRoot) }
+                    }
+                    .start()
+            } else {
+                oldRoot?.let { v -> runCatching { wm.removeView(v) } }
+            }
             return
         }
         if (chargeRoot == null) {
