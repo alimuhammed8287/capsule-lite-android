@@ -875,12 +875,14 @@ class MainActivity : Activity() {
         val caption = TextView(this).apply { text = "$label: $start"; setTextColor(primaryTextColor()) }
         parent.addView(caption)
         parent.addView(SeekBar(this).apply {
-            contentDescription = label
+            contentDescription = "$label: $start"
             max = hi - lo
             progress = start - lo
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
-                    caption.text = "$label: ${(p + lo).coerceIn(lo, hi)}"
+                    val value = (p + lo).coerceIn(lo, hi)
+                    caption.text = "$label: $value"
+                    sb.contentDescription = "$label: $value"
                 }
                 override fun onStartTrackingTouch(sb: SeekBar) {}
                 override fun onStopTrackingTouch(sb: SeekBar) {
