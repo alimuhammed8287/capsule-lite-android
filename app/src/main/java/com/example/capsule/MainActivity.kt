@@ -388,6 +388,8 @@ class MainActivity : Activity() {
         val liveApps = EditText(this).apply {
             hint = "Optional live-activity allow-list (package names, comma separated; blank = all apps)"
             setText(prefs.getString("liveActivityApps", ""))
+            setTextColor(primaryTextColor())
+            setHintTextColor(secondaryTextColor())
             textSize = 13f
         }
         shown.addView(liveApps)
@@ -419,11 +421,15 @@ class MainActivity : Activity() {
         val replyField = EditText(this).apply {
             hint = "Quick replies, comma separated (up to 3)"
             setText(prefs.getString("replies", "Yes,Later,Busy"))
+            setTextColor(primaryTextColor())
+            setHintTextColor(secondaryTextColor())
         }
         custom.addView(replyField)
         val pinField = EditText(this).apply {
             hint = "Pinned apps, package names, comma separated (up to 4)"
             setText(prefs.getString("pinned", ""))
+            setTextColor(primaryTextColor())
+            setHintTextColor(secondaryTextColor())
         }
         custom.addView(pinField)
         button(custom, "Save") {
@@ -566,6 +572,8 @@ class MainActivity : Activity() {
         val blockField = EditText(this).apply {
             hint = "Hide notifications from these apps (package names, comma separated)"
             setText(prefs.getString("blockedApps", ""))
+            setTextColor(primaryTextColor())
+            setHintTextColor(secondaryTextColor())
         }
         privacy.addView(blockField)
         button(privacy, "Save hidden apps") {
