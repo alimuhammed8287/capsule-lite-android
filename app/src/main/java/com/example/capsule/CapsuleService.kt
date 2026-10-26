@@ -3512,7 +3512,7 @@ class CapsuleService : NotificationListenerService() {
         if (seq != seenManeuver) {
             seenManeuver = seq
             val now = SystemClock.uptimeMillis()
-            if (prefs.getBoolean("mapsInfo", false) && mapsShown() && !expanded && now - lastMapsPeek > 8000) {
+            if (prefs.getBoolean("mapsInfo", true) && mapsShown() && !expanded && now - lastMapsPeek > 8000) {
                 lastMapsPeek = now
                 peek(5000L)
             }
@@ -3599,7 +3599,7 @@ class CapsuleService : NotificationListenerService() {
 
     // Maps info replaces the music text while navigating and no music is playing
     private fun mapsShown(): Boolean =
-        prefs.getBoolean("mapsInfo", false) && MapsNav.active && !callActive && !showingNotif &&
+        prefs.getBoolean("mapsInfo", true) && MapsNav.active && !callActive && !showingNotif &&
             !(showMusic() && controller?.playbackState?.state == PlaybackState.STATE_PLAYING)
 
     private fun renderMedia() {
@@ -3744,7 +3744,7 @@ class CapsuleService : NotificationListenerService() {
             if (sbn.isOngoing || n.category == Notification.CATEGORY_NAVIGATION) {
                 mapsNavKeys.add(sbn.key)
                 MapsNav.notifAlive = true
-                if (prefs.getBoolean("mapsInfo", false) && feedMaps(n)) {
+                if (prefs.getBoolean("mapsInfo", true) && feedMaps(n)) {
                     uiPost { applyVisibility() }
                     return
                 }
@@ -3833,7 +3833,7 @@ class CapsuleService : NotificationListenerService() {
             }
             if (isMaps) {
                 val nowMs = SystemClock.uptimeMillis()
-                if (!debugMaps && prefs.getBoolean("mapsInfo", false) && MapsNav.active && mapsShown()) {
+                if (!debugMaps && prefs.getBoolean("mapsInfo", true) && MapsNav.active && mapsShown()) {
                     // The navigation pill already shows the details: just open it for a moment at a new turn
                     if (nowMs - lastMapsPeek > 8000) {
                         lastMapsPeek = nowMs
