@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.capsulelite"
         minSdk = 24
         targetSdk = 34
-        versionCode = 41
-        versionName = "1.3.3"
+        versionCode = 42
+        versionName = "1.3.4"
     }
 
     // NEW: tells the Java compiler to use Java 17
