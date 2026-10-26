@@ -21,8 +21,8 @@ policy = policy_path.read_text() if policy_path.exists() else ""
 main = (ROOT / "app/src/main/java/com/example/capsule/MainActivity.kt").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 checks = {
-    "versionCode 38": bool(re.search(r"versionCode\s*=\s*38\b", build)),
-    "versionName 1.3.0": 'versionName = "1.3.0"' in build,
+    "versionCode 39": bool(re.search(r"versionCode\s*=\s*39\b", build)),
+    "versionName 1.3.1": 'versionName = "1.3.1"' in build,
     "adaptive ticker": "nextTickDelayMs()" in service,
     "screen-aware visualizer": "isInteractive" in service,
     "live activity classification": "fun classify(sbn: StatusBarNotification)" in policy,
