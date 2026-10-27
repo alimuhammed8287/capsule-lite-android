@@ -96,6 +96,13 @@ class CapsuleService : NotificationListenerService() {
     private var chargeFlightBitmap: Bitmap? = null
     private var chargeFlightRect = RectF()
     private var chargeFlightPending = false
+    // Keep the media artwork as one continuous shared element between compact and expanded layouts.
+    private var mediaArtFlightAnimator: ValueAnimator? = null
+    private var mediaArtFlightBitmap: Bitmap? = null
+    private var mediaArtFlightRect = RectF()
+    private var mediaArtFlightPending = false
+    private var mediaArtFlightView: ImageView? = null
+    private var pillEdgeAnimator: ValueAnimator? = null
     private var chargeEta = "ETA —"
     private lateinit var chargeTop: List<TextView>
     private lateinit var chargeBottom: List<TextView>
@@ -190,6 +197,9 @@ class CapsuleService : NotificationListenerService() {
 
     private var expanded = false
     private var showingNotif = false
+    // User-initiated queue browsing may temporarily surface a notification above media/navigation.
+    // Calls, stopwatch, and live timer activities keep their normal priority.
+    private var userFocusedNotification = false
     private var notifIntent: PendingIntent? = null
     private var notifKey: String? = null
     private var notifLevel = 0   // 0 = none, 1 = title and text only, 2 = with reply and action buttons
@@ -279,6 +289,7 @@ class CapsuleService : NotificationListenerService() {
             refreshMedia()   // a ringing call keeps the pill open
         } else {
             showingNotif = false
+            userFocusedNotification = false
             notifIntent = null
             notifKey = null
             notifLevel = 0
@@ -324,6 +335,7 @@ class CapsuleService : NotificationListenerService() {
             // Collapsed pill with a waiting notification: bring it back
             val waiting = pending
             if (waiting != null && !expanded && !showingNotif && !callActive) {
+                userFocusedNotification = true
                 presentNotif(waiting, 1)
                 setExpanded(true)
                 armNotifTimer()
@@ -376,7 +388,10 @@ class CapsuleService : NotificationListenerService() {
                 (pending != null || showingNotif)) {
                 // A downward swipe is an explicit expand gesture, not notification dismissal.
                 val waiting = pending
-                if (!showingNotif && waiting != null) presentNotif(waiting, 1)
+                if (!showingNotif && waiting != null) {
+                    userFocusedNotification = true
+                    presentNotif(waiting, 1)
+                }
                 handler.removeCallbacks(collapse)
                 setExpanded(true)
                 armNotifTimer()
@@ -521,6 +536,9 @@ class CapsuleService : NotificationListenerService() {
     private fun teardown() {
         stopSpring()
         cancelChargeIconFlight()
+        cancelMediaArtFlight()
+        pillEdgeAnimator?.cancel()
+        pillEdgeAnimator = null
         clearSnapshot()
         root?.let { clearAnimationsRecursively(it) }
         runCatching { stopForeground(true) }
@@ -1100,7 +1118,9 @@ class CapsuleService : NotificationListenerService() {
                 contentDescription = "Unread notifications"
                 setOnClickListener {
                     val waiting = pending ?: return@setOnClickListener
+                    if (callActive || stopwatchStart > 0L || liveActivityIsShowing()) return@setOnClickListener
                     handler.removeCallbacks(collapse)
+                    userFocusedNotification = true
                     presentNotif(waiting, 1)
                     setExpanded(true)
                     armNotifTimer()
@@ -1252,6 +1272,7 @@ class CapsuleService : NotificationListenerService() {
     private fun activityWinner(): String? {
         if (callActive) return "calls"
         if (stopwatchStart > 0L) return "stopwatch"
+        if (userFocusedNotification && showingNotif && !liveActivityIsShowing()) return "notifications"
         fun active(name: String): Boolean = when (name) {
             "live" -> liveActivityIsShowing()
             "notifications" -> showingNotif && !liveActivityIsShowing()
@@ -1812,7 +1833,10 @@ class CapsuleService : NotificationListenerService() {
     private fun removeQueuedNotification(key: String?) {
         if (key == null) return
         notificationQueue.remove(key)
-        if (notificationQueue.isEmpty()) notificationOverflow = 0
+        if (notificationQueue.isEmpty()) {
+            notificationOverflow = 0
+            userFocusedNotification = false
+        }
         pending = notificationQueue.values.lastOrNull()
         refreshNotificationBadge()
     }
@@ -1849,11 +1873,12 @@ class CapsuleService : NotificationListenerService() {
 
     private fun browseQueuedNotification(delta: Int) {
         val items = notificationQueue.values.toList()
-        if (items.isEmpty()) return
+        if (items.isEmpty() || callActive || stopwatchStart > 0L || liveActivityIsShowing()) return
         val current = items.indexOfFirst { it.key == notifKey }
         val start = if (current >= 0) current else items.lastIndex
         val next = items[(start + delta).coerceIn(0, items.lastIndex)]
         handler.removeCallbacks(collapse)
+        userFocusedNotification = true
         presentNotif(next, 1)
         if (!expanded) setExpanded(true) else applyVisibility()
         refreshNotificationBadge()
@@ -1895,6 +1920,8 @@ class CapsuleService : NotificationListenerService() {
         }
         val style = pillAnimationStyle()
         val flight = style == "continuity" && motionEnabled() && prepareChargeIconFlight(e)
+        val artFlight = style == "continuity" && motionEnabled() &&
+            activityWinner() == "media" && !lockScreenActive() && prepareMediaArtFlight()
         if (flight && e) chargeBox.alpha = 0f
         if (style != "settling_dock") snapshotOld() else clearSnapshot()
         expanded = e
@@ -1902,7 +1929,145 @@ class CapsuleService : NotificationListenerService() {
         staggerIn()
         animateSize()
         if (flight) startChargeIconFlight(e)
+        if (artFlight) startMediaArtFlight()
+        animatePillEdge(style)
         if (style == "settling_dock") animateSettlingChargeIcon(e)
+    }
+
+    // Reference motion uses a restrained lit edge to make the active surface easier to track.
+    private fun animatePillEdge(animationStyle: String) {
+        val surface = pill?.background as? GradientDrawable ?: return
+        pillEdgeAnimator?.cancel()
+        val style = pillStyle()
+        val base = if (prefs.getBoolean("blur", false) && style.id == "capsule") 0x66FFFFFF else style.outline
+        if (!motionEnabled() || animationStyle == "settling_dock") {
+            surface.setStroke(dp(1), base)
+            return
+        }
+        val accent = pillAccent()
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = when (prefs.getInt("springPreset", 1)) { 0 -> 260L; 2 -> 440L; else -> 340L }
+            interpolator = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+            addUpdateListener { value ->
+                val t = value.animatedValue as Float
+                val pulse = if (t < 0.42f) t / 0.42f else 1f - ((t - 0.42f) / 0.58f)
+                val color = android.animation.ArgbEvaluator().evaluate(pulse * 0.58f, base, accent) as Int
+                surface.setStroke(dp(1 + pulse.coerceAtLeast(0f).times(1.5f).toInt()), color)
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (pillEdgeAnimator !== animation) return
+                    pillEdgeAnimator = null
+                    surface.setStroke(dp(1), base)
+                }
+            })
+        }
+        pillEdgeAnimator = animator
+        animator.start()
+    }
+
+    private fun prepareMediaArtFlight(): Boolean {
+        val continuing = mediaArtFlightAnimator != null && mediaArtFlightBitmap?.isRecycled == false
+        if (continuing) {
+            val oldAnimator = mediaArtFlightAnimator
+            mediaArtFlightAnimator = null
+            oldAnimator?.cancel()
+            mediaArtFlightPending = true
+            icon.alpha = 0f
+            return true
+        }
+        if (icon.visibility != View.VISIBLE || icon.width <= 0 || icon.height <= 0) return false
+        val bitmap = runCatching {
+            Bitmap.createBitmap(icon.width, icon.height, Bitmap.Config.ARGB_8888).also { icon.draw(Canvas(it)) }
+        }.getOrNull() ?: return false
+        val loc = IntArray(2)
+        icon.getLocationOnScreen(loc)
+        mediaArtFlightBitmap?.takeIf { !it.isRecycled }?.recycle()
+        mediaArtFlightBitmap = bitmap
+        mediaArtFlightRect = RectF(loc[0].toFloat(), loc[1].toFloat(),
+            (loc[0] + icon.width).toFloat(), (loc[1] + icon.height).toFloat())
+        mediaArtFlightPending = true
+        icon.alpha = 0f
+        return true
+    }
+
+    private fun startMediaArtFlight() {
+        val container = root as? FrameLayout ?: run { cancelMediaArtFlight(); return }
+        container.post {
+            val bitmap = mediaArtFlightBitmap
+            if (bitmap == null || bitmap.isRecycled || icon.width <= 0 || icon.height <= 0 ||
+                icon.visibility != View.VISIBLE) {
+                cancelMediaArtFlight()
+                return@post
+            }
+            val image = mediaArtFlightView ?: ImageView(uiCtx).also {
+                it.scaleType = ImageView.ScaleType.CENTER_CROP
+                mediaArtFlightView = it
+                container.addView(it, FrameLayout.LayoutParams(1, 1))
+            }
+            image.setImageBitmap(bitmap)
+            image.visibility = View.VISIBLE
+            val from = RectF(mediaArtFlightRect)
+            val duration = when (prefs.getInt("springPreset", 1)) { 0 -> 260L; 2 -> 440L; else -> 340L }
+            fun targetRect(): RectF {
+                val loc = IntArray(2)
+                icon.getLocationOnScreen(loc)
+                return RectF(loc[0].toFloat(), loc[1].toFloat(),
+                    (loc[0] + icon.width).toFloat(), (loc[1] + icon.height).toFloat())
+            }
+            fun place(rect: RectF) {
+                val rootLoc = IntArray(2)
+                container.getLocationOnScreen(rootLoc)
+                val lp = image.layoutParams as FrameLayout.LayoutParams
+                lp.width = rect.width().toInt().coerceAtLeast(1)
+                lp.height = rect.height().toInt().coerceAtLeast(1)
+                lp.leftMargin = (rect.left - rootLoc[0] - container.paddingLeft).toInt()
+                lp.topMargin = (rect.top - rootLoc[1]).toInt()
+                image.layoutParams = lp
+                mediaArtFlightRect.set(rect)
+            }
+            place(from)
+            val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                this.duration = duration
+                interpolator = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+                addUpdateListener { a ->
+                    val f = a.animatedValue as Float
+                    val end = targetRect()
+                    place(RectF(
+                        from.left + (end.left - from.left) * f,
+                        from.top + (end.top - from.top) * f,
+                        from.right + (end.right - from.right) * f,
+                        from.bottom + (end.bottom - from.bottom) * f
+                    ))
+                    icon.alpha = f
+                }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        if (mediaArtFlightAnimator !== animation) return
+                        mediaArtFlightAnimator = null
+                        cancelMediaArtFlight()
+                    }
+                })
+            }
+            mediaArtFlightPending = false
+            mediaArtFlightAnimator = animator
+            animator.start()
+        }
+    }
+
+    private fun cancelMediaArtFlight() {
+        mediaArtFlightPending = false
+        mediaArtFlightAnimator?.cancel()
+        mediaArtFlightAnimator = null
+        mediaArtFlightView?.let { view ->
+            view.setImageDrawable(null)
+            view.visibility = View.GONE
+            (view.parent as? android.view.ViewGroup)?.removeView(view)
+        }
+        mediaArtFlightView = null
+        mediaArtFlightBitmap?.takeIf { !it.isRecycled }?.recycle()
+        mediaArtFlightBitmap = null
+        if (::icon.isInitialized) icon.alpha = 1f
     }
 
     private fun prepareChargeIconFlight(expanding: Boolean): Boolean {
@@ -2059,6 +2224,7 @@ class CapsuleService : NotificationListenerService() {
         if (!motionEnabled()) {
             // If motion is disabled while an entrance is queued, clear the old animation state too.
             for (v in items) {
+                if (mediaArtFlightPending && v === icon) continue
                 if (chargeFlightPending && (v === chargeBox || v === miniRight)) continue
                 v.animate().cancel()
                 blurAnimators.remove(v)?.cancel()
@@ -2074,6 +2240,7 @@ class CapsuleService : NotificationListenerService() {
         lastStaggerAt = now
         var k = 0
         for (v in items) {
+            if (mediaArtFlightPending && v === icon) continue
             if (chargeFlightPending && (v === chargeBox || v === miniRight)) continue
             // Cancel even hidden children: an earlier delayed animator must not wake up after the
             // content mode has changed and mutate a view that is no longer part of the presentation.
@@ -2387,7 +2554,7 @@ class CapsuleService : NotificationListenerService() {
             clearSnapshot()
             return
         }
-        if (chargeFlightPending) return
+        if (chargeFlightPending || mediaArtFlightPending) return
         if (android.os.Build.VERSION.SDK_INT < 31) return
         if (!motionEnabled()) {
             // If motion was disabled while a prior snapshot was fading out, remove it immediately.
@@ -3482,7 +3649,7 @@ class CapsuleService : NotificationListenerService() {
         val chargeOn = !hideAll && expanded && !callActive && winner == "charging" && chargeExpandedShown()
         val navOn = !hideAll && expanded && !callActive && winner == "navigation" && mapsShown()
         val notifStackOn = !hideAll && expanded && !callActive && notifOn && (replyOn || actionOn)
-        val queueNavOn = !hideAll && expanded && showingNotif && notificationQueue.size > 1 && !callActive && !lockPrivate
+        val queueNavOn = !hideAll && expanded && notifOn && notificationQueue.size > 1 && !lockPrivate
         setMusicLayout(musicOn || notifStackOn || callOn)
         qsGrid.visibility = vis(qsOn)
         widgetImage.visibility = vis(widgetOn)
@@ -4005,8 +4172,12 @@ class CapsuleService : NotificationListenerService() {
                 icon.setImageDrawable(appIcon(c.packageName))
             }
             val playing = c.playbackState?.state == PlaybackState.STATE_PLAYING
+            val playPauseIcon = when (pillStyle().id) {
+                "oneui" -> if (playing) R.drawable.ic_oneui_pause else R.drawable.ic_oneui_play
+                else -> if (playing) R.drawable.ic_pause else R.drawable.ic_play
+            }
             btnPlay.setImageResource(
-                if (playing) R.drawable.ic_pause else R.drawable.ic_play
+                playPauseIcon
             )
             val playDescription = if (playing) "Pause playback" else "Resume playback"
             if (btnPlay.contentDescription?.toString() != playDescription) {
