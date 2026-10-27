@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Color
 import android.content.ComponentName
+import android.content.ClipData
 import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -20,6 +21,8 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import org.json.JSONObject
+import androidx.core.content.FileProvider
+import java.io.File
 
 class MainActivity : Activity() {
 
@@ -79,7 +82,8 @@ class MainActivity : Activity() {
     }
 
     private val titles = mapOf(
-        "setup" to "Setup and diagnostics",
+        "setup" to "Setup and recovery",
+        "diagnostics" to "Diagnostic log",
         "pill" to "Pill",
         "music" to "Music",
         "notifications" to "Notifications",
@@ -93,11 +97,12 @@ class MainActivity : Activity() {
 
     private val sectionDescriptions = mapOf(
         "setup" to "Check permissions, service health, and recovery options.",
+        "diagnostics" to "Review, copy, or share a diagnostic report.",
         "pill" to "Tune size, placement, gestures, and when the pill appears.",
         "music" to "Choose playback controls and visualizer behaviour.",
         "notifications" to "Control notification visibility, live activities, and replies.",
         "quick" to "Personalise quick controls, tiles, and pinned apps.",
-        "charging" to "Customise charging status, animation, and the separate pill.",
+        "charging" to "Customise charging status, animation, and session summaries.",
         "look" to "Choose colours, typography, glass styling, and motion.",
         "privacy" to "Manage hidden apps and on-device notification history.",
         "tools" to "Back up settings, restore a configuration, or reset preferences."
@@ -221,7 +226,7 @@ class MainActivity : Activity() {
                     letterSpacing = -0.035f
                 })
                 addView(TextView(this@MainActivity).apply {
-                    text = if (cat == null) "FLOATING COMPANION  ·  V1.3.8" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
+                    text = if (cat == null) "FLOATING COMPANION  ·  V1.4.2" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
                     textSize = 10f
                     letterSpacing = 0.08f
                     setTextColor(secondaryTextColor())
@@ -246,6 +251,7 @@ class MainActivity : Activity() {
         when (cat) {
             null -> buildHome()
             "setup" -> buildSetup()
+            "diagnostics" -> buildDiagnostics()
             "pill" -> buildPill()
             "music" -> buildMusic()
             "notifications" -> buildNotifications()
@@ -268,17 +274,122 @@ class MainActivity : Activity() {
     }
 
     private fun showDiagnostics() {
-        if (!::diagText.isInitialized) return
-        val log = DiagLog.lastLines(this, 300)
-        diagText.text = log.ifEmpty { "no service events yet" }
-        if (::repairText.isInitialized) {
-            repairText.text = "Accessibility keep-alive: " + (if (KeepAlive.isAccessibilityEnabled(this)) "on" else "OFF") +
-                "\nAutomatic repair: " + when {
-                    !prefs.getBoolean("autoRepairServices", false) -> "off (opt-in switch is off)"
-                    !KeepAlive.canSelfRepair(this) -> "enabled, but optional ADB permission is missing"
-                    else -> "enabled"
-                } + "\nShowing the last 300 lines. Copy gives everything."
+        if (::diagText.isInitialized) {
+            val log = DiagLog.lastLines(this, 300)
+            diagText.text = log.ifEmpty { "No service events recorded yet." }
         }
+        if (::repairText.isInitialized) {
+            val listenerEnabled = KeepAlive.isListenerEnabled(this)
+            val listenerConnected = KeepAlive.listenerConnected
+            val accessibilityEnabled = KeepAlive.isAccessibilityEnabled(this)
+            val accessibilityConnected = KeepAlive.accessibilityConnected
+            repairText.text = buildString {
+                append("Notification listener: ")
+                    .append(if (listenerEnabled && listenerConnected) "Connected" else if (listenerEnabled) "Enabled, not connected" else "Permission needed")
+                    .append('\n')
+                append("Accessibility keep-alive: ")
+                    .append(if (accessibilityEnabled && accessibilityConnected) "Connected" else if (accessibilityEnabled) "Enabled, not connected" else "Permission needed")
+                    .append('\n')
+                append("Overlay: ").append(if (Settings.canDrawOverlays(this@MainActivity)) "Allowed" else "Permission needed")
+                    .append('\n')
+                append("Automatic repair: ").append(when {
+                    !prefs.getBoolean("autoRepairServices", false) -> "off"
+                    !KeepAlive.canSelfRepair(this@MainActivity) -> "on, but optional ADB permission is missing"
+                    else -> "on"
+                }).append('\n')
+                append("Next step: ").append(when {
+                    !Settings.canDrawOverlays(this@MainActivity) -> "allow Display over other apps"
+                    !listenerEnabled -> "enable Notification access"
+                    !listenerConnected -> "tap Try reconnect, then reopen Capsule if it stays disconnected"
+                    !accessibilityEnabled -> "enable the optional keep-alive in Accessibility settings"
+                    else -> "refresh diagnostics if the pill is still missing"
+                })
+            }
+        }
+    }
+
+    private fun reconnectServices() {
+        when {
+            !Settings.canDrawOverlays(this) -> {
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            }
+            !KeepAlive.isListenerEnabled(this) -> {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+            else -> {
+                runCatching { NotificationListenerService.requestRebind(ComponentName(this, CapsuleService::class.java)) }
+                KeepAlive.schedule(this, 1_000L)
+                android.widget.Toast.makeText(this, "Reconnect requested. Refresh in a moment.", android.widget.Toast.LENGTH_SHORT).show()
+                showDiagnostics()
+            }
+        }
+    }
+
+    private fun buildDiagnostics() {
+        val health = card("Service health")
+        health.addView(status)
+        repairText = TextView(this).apply {
+            textSize = 13f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(6), dp(2), dp(6), dp(8))
+        }
+        health.addView(repairText)
+        button(health, "Try reconnect") { reconnectServices() }
+        button(health, "Refresh status and log") { showDiagnostics() }
+
+        val logCard = card("Recent diagnostic events")
+        diagText = TextView(this).apply {
+            textSize = 11f
+            setTextColor(secondaryTextColor())
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(dp(6), dp(4), dp(6), dp(8))
+        }
+        logCard.addView(diagText)
+        button(logCard, "Copy full diagnostics") { copyDiagnostics() }
+        button(logCard, "Share diagnostics as .txt") { shareDiagnosticsFile() }
+        button(logCard, "Clear diagnostics") {
+            AlertDialog.Builder(this)
+                .setTitle("Clear diagnostic log?")
+                .setMessage("This clears saved event history. It does not change permissions or service settings.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear") { _, _ -> DiagLog.clear(this); showDiagnostics() }
+                .show()
+        }
+        TextView(this).apply {
+            text = "The report contains device details, selected settings, and recent service events. Review it before sharing."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(6), dp(2), dp(6), dp(8))
+        }.also { logCard.addView(it) }
+    }
+
+    private fun shareDiagnosticsFile() {
+        AlertDialog.Builder(this)
+            .setTitle("Share diagnostics?")
+            .setMessage("A .txt file will include device details, saved settings, and recent service events. Only continue if you are comfortable sharing those details.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Continue") { _, _ ->
+                runCatching {
+                    val directory = File(cacheDir, "shared")
+                    directory.mkdirs()
+                    directory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(3)?.forEach { it.delete() }
+                    val file = File(directory, "capsule-lite-diagnostics-${System.currentTimeMillis()}.txt")
+                    file.writeText(DiagLog.report(this), Charsets.UTF_8)
+                    val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                    val share = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "Capsule Lite diagnostics")
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        clipData = ClipData.newUri(contentResolver, "Capsule Lite diagnostics", uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(share, "Share diagnostic file"))
+                }.onFailure {
+                    android.widget.Toast.makeText(this, "Could not share diagnostics: ${it.message ?: "file error"}", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+            .show()
     }
 
     private fun copyDiagnostics() {
@@ -298,7 +409,7 @@ class MainActivity : Activity() {
 
     // The main screen: a short list of categories
     private fun buildHome() {
-        homeTile("⚙", "Setup and diagnostics", "Permissions, service status and troubleshooting", "setup")
+        homeTile("⚙", "Setup and recovery", "Permissions, service status and troubleshooting", "setup")
         homeTile("◉", "Pill appearance", "Size, position, gestures and behaviour", "pill")
         homeTile("♫", "Media player", "Playback controls, visualizer and layout", "music")
         homeTile("▤", "Notifications", "Events, auto-collapse and quick replies", "notifications")
@@ -369,32 +480,25 @@ class MainActivity : Activity() {
     }
 
     private fun buildSetup() {
-        val diag = card("App status and diagnostics")
-        diag.addView(status)
-        repairText = TextView(this).apply { textSize = 13f; setTextColor(secondaryTextColor()) }
-        diag.addView(repairText)
-        diagText = TextView(this).apply {
-            textSize = 11f
+        val health = card("Service health and recovery")
+        health.addView(status)
+        repairText = TextView(this).apply {
+            textSize = 13f
             setTextColor(secondaryTextColor())
-            typeface = Typeface.MONOSPACE
-            setTextIsSelectable(true)
+            setPadding(dp(6), dp(2), dp(6), dp(8))
         }
-        diag.addView(diagText)
-        button(diag, "Copy full diagnostics") { copyDiagnostics() }
-        button(diag, "Refresh") { showDiagnostics() }
-        button(diag, "Clear diagnostics") {
-            DiagLog.clear(this)
-            showDiagnostics()
-        }
-        toggle(diag, "Allow automatic service repair if Android disables it (optional)", "autoRepairServices", false)
+        health.addView(repairText)
+        button(health, "Try reconnect") { reconnectServices() }
+        button(health, "Open diagnostic details") { open("diagnostics") }
+        toggle(health, "Allow automatic service repair if Android disables it (optional)", "autoRepairServices", false)
         TextView(this).apply {
-            text = "Automatic repair is off by default. If you enable it, the optional ADB permission is also required. Turning this off prevents Capsule from re-enabling services you deliberately disabled."
+            text = "Repair is opt-in. Android still requires you to grant or restore permissions in Settings."
             textSize = 12f
             setTextColor(secondaryTextColor())
             setPadding(dp(8), dp(2), dp(8), dp(8))
-        }.also { diag.addView(it) }
-        button(diag, "Copy optional ADB permission command") { copyRepairCommand() }
-        toggle(diag, "Keep-running notification (helps Android keep Capsule alive)", "keepNotif", true)
+        }.also { health.addView(it) }
+        button(health, "Copy optional ADB permission command") { copyRepairCommand() }
+        toggle(health, "Keep-running notification (helps Android keep Capsule alive)", "keepNotif", true)
 
         val perms = card("Permissions")
         button(perms, "1. Display over other apps") {
@@ -470,6 +574,7 @@ class MainActivity : Activity() {
         toggle(shown, "Phone events (unlock, headphones, Bluetooth)", "showEvents", true)
         toggle(shown, "Downloads and progress activities", "showDownloads", true)
         toggle(shown, "Live timer and stopwatch notifications", "liveActivities", true)
+        activityPriorityButton(shown)
         val liveApps = EditText(this).apply {
             hint = "Optional live-activity allow-list (package names, comma separated; blank = all apps)"
             contentDescription = "Live-activity app allow-list, comma-separated package names"
@@ -492,6 +597,100 @@ class MainActivity : Activity() {
         val heights = card("Heights")
         slider(heights, "Height: notifications and calls", "expH_notif", 40, 120, 64)
         slider(heights, "Height: notification with buttons", "expH_stack", 40, 160, 104)
+    }
+
+    private fun activityPriorityButton(parent: LinearLayout) {
+        val ids = listOf("live", "notifications", "media", "navigation", "charging")
+        val names = mapOf(
+            "live" to "Live timers and downloads",
+            "notifications" to "Other notifications",
+            "media" to "Media",
+            "navigation" to "Navigation",
+            "charging" to "Charging"
+        )
+        fun order(): MutableList<String> {
+            val saved = (prefs.getString("activityPriorityOrder", "") ?: "")
+                .split(",").map { it.trim() }.filter { it in ids }.distinct()
+            return (saved + ids.filter { it !in saved }).toMutableList()
+        }
+        fun label(values: List<String>) = "Activity priority: " +
+            (listOf("Calls (fixed)") + values.mapNotNull { names[it] }).joinToString("  ›  ")
+        val button = styledButton().apply {
+            text = label(order())
+            contentDescription = "Arrange activity priority"
+        }
+        button.setOnClickListener {
+            val values = order()
+            val rows = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(18), dp(6), dp(18), dp(4))
+            }
+            lateinit var dialog: AlertDialog
+            fun redraw() {
+                rows.removeAllViews()
+                values.forEachIndexed { index, id ->
+                    val row = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        setPadding(0, dp(3), 0, dp(3))
+                    }
+                    row.addView(TextView(this).apply {
+                        text = "${index + 2}. ${names[id]}"
+                        textSize = 14f
+                        setTextColor(primaryTextColor())
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                    }, LinearLayout.LayoutParams(0, dp(48), 1f))
+                    val up = styledButton().apply {
+                        text = "↑"
+                        contentDescription = "Move ${names[id]} up"
+                        isEnabled = index > 0
+                        setOnClickListener {
+                            if (index > 0) {
+                                val previous = values[index - 1]
+                                values[index - 1] = values[index]
+                                values[index] = previous
+                                redraw()
+                            }
+                        }
+                    }
+                    val down = styledButton().apply {
+                        text = "↓"
+                        contentDescription = "Move ${names[id]} down"
+                        isEnabled = index < values.lastIndex
+                        setOnClickListener {
+                            if (index < values.lastIndex) {
+                                val next = values[index + 1]
+                                values[index + 1] = values[index]
+                                values[index] = next
+                                redraw()
+                            }
+                        }
+                    }
+                    row.addView(up, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
+                    row.addView(down, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
+                    rows.addView(row)
+                }
+            }
+            dialog = AlertDialog.Builder(this)
+                .setTitle("Activity priority")
+                .setMessage("Calls and controls you open directly stay on top. Move other activities to choose which one wins when several are active.")
+                .setView(rows)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save") { _, _ ->
+                    prefs.edit().putString("activityPriorityOrder", values.joinToString(",")).apply()
+                    button.text = label(values)
+                }
+                .create()
+            redraw()
+            dialog.show()
+        }
+        parent.addView(button)
+        parent.addView(TextView(this).apply {
+            text = "When activities overlap, Capsule shows the highest item in this order. Calls and manually opened controls remain fixed above it."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(4), dp(2), dp(8))
+        })
     }
 
     private fun buildQuick() {
@@ -534,62 +733,62 @@ class MainActivity : Activity() {
 
     private fun buildCharging() {
         val charge = card("Charging")
-        toggle(charge, "Show charging status", "showCharging", true)
-        toggle(charge, "Move charging into a separate pill while notifications, Maps, music or calls are active", "separateChargePill", true)
+        toggle(charge, "Show charging status in the main pill", "showCharging", true)
         toggle(charge, "Charging alerts (when the charge reaches a level, or is full)", "chargeAlert", true)
         slider(charge, "Alert at charge (%)", "chargeAlertAt", 50, 100, 80)
         slider(charge, "Height: charging", "expH_charge", 40, 120, 64)
-        slider(charge, "Separate pill width", "chargeMiniW", 76, 150, 100)
-        slider(charge, "Separate pill height", "chargeMiniH", 34, 64, 42)
-        slider(charge, "Separate pill vertical offset", "chargeMiniYOffset", -80, 120, 0)
+        slider(charge, "Charging ring size (dp)", "chargeRingSize", 36, 64, 48)
+        charge.addView(TextView(this).apply {
+            text = "Changes the irregular charging ring in both pill sizes; the compact ring scales down to keep the battery percentage readable."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(1), dp(2), dp(5))
+        })
         chargingStyleButton(charge)
         chargingIconButton(charge)
-
-        val gestures = card("Separate pill gestures")
         TextView(this).apply {
-            text = "Choose actions for the charging pill independently from the main pill."
+            text = "Choose a charging icon for both pill sizes. The irregular progress ring keeps the bolt still, animates its outline, and leaves a gap for the remaining charge. Charging stat icons follow the selected pill theme."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(4), dp(2), dp(6))
+        }.also { charge.addView(it) }
+
+        val sessions = card("Charging sessions")
+        val historyText = TextView(this).apply {
+            text = ChargingSessionHistory.summary(this@MainActivity)
+            textSize = 13f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(4), dp(4), dp(4), dp(8))
+        }
+        sessions.addView(historyText)
+        button(sessions, "Refresh session summary") {
+            historyText.text = ChargingSessionHistory.summary(this)
+        }
+        button(sessions, "Clear completed sessions") {
+            AlertDialog.Builder(this)
+                .setTitle("Clear charging history?")
+                .setMessage("This removes completed session summaries stored on this device. An active session will continue to be recorded.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear") { _, _ ->
+                    ChargingSessionHistory.clear(this)
+                    historyText.text = ChargingSessionHistory.summary(this)
+                }
+                .show()
+        }
+        TextView(this).apply {
+            text = "Summaries stay on this device and keep only the latest 20 sessions. Power and temperature are device readings, not battery-health measurements."
             textSize = 12f
             setTextColor(secondaryTextColor())
             setPadding(dp(2), dp(2), dp(2), dp(6))
-        }.also { gestures.addView(it) }
-        TextView(this).apply {
-            text = "Tip: swipe down on the separate charging pill to expand it, then swipe up to collapse it. The battery icon stays anchored while the details crossfade."
-            textSize = 12f
-            setTextColor(secondaryTextColor())
-            setPadding(dp(2), dp(2), dp(2), dp(8))
-        }.also { gestures.addView(it) }
-        chargeGestureButton(gestures, "chargePillTap", "Single tap")
-        chargeGestureButton(gestures, "chargePillDoubleTap", "Double tap")
-        chargeGestureButton(gestures, "chargePillLongPress", "Long press")
-    }
+        }.also { sessions.addView(it) }
 
-    private fun chargeGestureButton(parent: LinearLayout, key: String, label: String) {
-        val actions = listOf("battery" to "Open battery screen", "toggle" to "Expand/collapse charging pill", "none" to "Do nothing")
-        fun current() = (prefs.getString(key, if (key == "chargePillTap") "toggle" else "none") ?: "none")
-            .let { value -> actions.indexOfFirst { it.first == value }.coerceAtLeast(0) }
-        val b = styledButton().apply {
-            text = "$label: " + actions[current()].second
-            contentDescription = "Configure separate charging pill $label"
-        }
-        b.setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle(label + " action")
-                .setSingleChoiceItems(actions.map { it.second }.toTypedArray(), current()) { dialog, which ->
-                    prefs.edit().putString(key, actions[which].first).apply()
-                    b.text = "$label: " + actions[which].second
-                    dialog.dismiss()
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
-        parent.addView(b)
     }
 
     private fun chargingStyleButton(parent: LinearLayout) {
         val styles = listOf("Liquid battery", "Segmented battery", "Pulse battery")
         fun current() = prefs.getInt("chargeIconStyle", 0).coerceIn(0, styles.lastIndex)
         val b = styledButton().apply {
-            text = "Charging icon: " + styles[current()]
+            text = "Charging animation: " + styles[current()]
             contentDescription = "Choose charging animation"
         }
         b.setOnClickListener {
@@ -597,7 +796,7 @@ class MainActivity : Activity() {
                 .setTitle("Charging animation")
                 .setSingleChoiceItems(styles.toTypedArray(), current()) { dialog, which ->
                     prefs.edit().putInt("chargeIconStyle", which).apply()
-                    b.text = "Charging icon: " + styles[which]
+                    b.text = "Charging animation: " + styles[which]
                     dialog.dismiss()
                 }
                 .setNegativeButton("Cancel", null)
@@ -607,18 +806,18 @@ class MainActivity : Activity() {
     }
 
     private fun chargingIconButton(parent: LinearLayout) {
-        val icons = listOf("Battery", "Lightning bolt", "Power plug", "Leaf", "Spark")
-        fun selected() = prefs.getInt("chargeIconShape", 0).coerceIn(0, icons.lastIndex)
+        val icons = listOf("One UI battery", "Lightning bolt", "Power plug", "Leaf", "Spark", "Pixel battery", "Nothing glyph dots", "Pixel charge ring", "Irregular progress ring")
+        fun selected() = prefs.getInt("chargeIconShape", 8).coerceIn(0, icons.lastIndex)
         val b = styledButton().apply {
-            text = "Charging symbol: " + icons[selected()]
-            contentDescription = "Choose charging symbol shape"
+            text = "Charging icon: " + icons[selected()]
+            contentDescription = "Choose charging icon design"
         }
         b.setOnClickListener {
             AlertDialog.Builder(this)
-                .setTitle("Charging symbol")
+                .setTitle("Charging icon")
                 .setSingleChoiceItems(icons.toTypedArray(), selected()) { dialog, which ->
                     prefs.edit().putInt("chargeIconShape", which).apply()
-                    b.text = "Charging symbol: " + icons[which]
+                    b.text = "Charging icon: " + icons[which]
                     dialog.dismiss()
                 }
                 .setNegativeButton("Cancel", null)
@@ -640,11 +839,26 @@ class MainActivity : Activity() {
         themePreview(look)
         fontButton(look)
         themeButton(look)
+        pillAnimationStyleButton(look)
+        look.addView(TextView(this).apply {
+            text = "Style-inspired presets change the pill's surface, accent, shape, and playback controls."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(5), dp(2), dp(2))
+        })
+        val lock = card("Lock screen")
+        toggle(lock, "Show the pill on the lock screen", "showOnLockScreen", true)
+        toggle(lock, "Hide notification and call details while locked", "lockScreenPrivacy", true)
+        lock.addView(TextView(this).apply {
+            text = "Android and HyperOS may restrict overlays on a secure lock screen. Capsule keeps notification text hidden until unlock; the system may still choose not to display the overlay."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(4), dp(2), dp(2))
+        })
         slider(look, "Text size (%)", "textScale", 70, 150, 100)
 
         val motion = card("Motion")
         motionPresetButton(motion)
-        toggle(motion, "Enable liquid morph animation", "springMotion", true)
         toggle(motion, "Reduce motion (short, non-staggered transitions)", "reduceMotion", false)
 
         val blur = card("Frosted glass")
@@ -741,8 +955,7 @@ class MainActivity : Activity() {
         "Control panel" -> "Choose how the quick-control panel opens and behaves."
         "Tiles in the control panel (switch off to remove a tile)" -> "Keep only the shortcuts you use."
         "Pinned apps and quick replies" -> "Personalize app shortcuts and supported reply suggestions."
-        "Charging" -> "Configure charging status, alerts, and the separate charging pill."
-        "Separate pill gestures" -> "Set independent actions for the secondary charging pill."
+        "Charging" -> "Configure charging status, alerts, and the main pill battery icon."
         "App theme" -> "Choose the appearance of the Capsule Lite settings screens."
         "Pill appearance" -> "Customize the floating pill's style, color, and typography."
         "Motion" -> "Balance smooth transitions with reduced-motion preferences."
@@ -900,40 +1113,52 @@ class MainActivity : Activity() {
         parent.addView(b)
     }
     private fun themePreview(parent: LinearLayout) {
-        val current = prefs.getString("theme", "black") ?: "black"
-        val (bg, stroke, glow) = when (current) {
-            "frosted" -> Triple(0xCC303641.toInt(), 0x99FFFFFF.toInt(), "FROSTED GLASS")
-            "futuristic" -> Triple(0xFF071827.toInt(), 0xFF43D9FF.toInt(), "FUTURISTIC CYAN")
-            "ios" -> Triple(0xFF34363D.toInt(), 0x66FFFFFF, "iOS INSPIRED")
-            "accent" -> Triple(0xFF08090C.toInt(), accent, "ACCENT OUTLINE")
-            else -> Triple(0xFF030405.toInt(), 0x443FFFFF.toInt(), "CLASSIC BLACK")
-        }
+        val style = PillStyles.palette(prefs.getString("theme", "capsule"))
         val preview = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply {
-                setColor(bg)
-                cornerRadius = dp(30).toFloat()
-                setStroke(dp(if (current == "futuristic" || current == "accent") 2 else 1), stroke)
+                orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                colors = intArrayOf(style.top, style.bottom)
+                cornerRadius = dp(style.cornerDp + 12).toFloat()
+                setStroke(dp(1), style.outline)
             }
-            setPadding(dp(16), dp(13), dp(16), dp(13))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58)).apply { bottomMargin = dp(8) }
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(72)).apply { bottomMargin = dp(8) }
         }
-        preview.addView(TextView(this).apply {
-            text = "●  82%   ·   ◉  ♫"
+        preview.addView(View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(style.accent)
+                cornerRadius = dp(style.artworkCornerDp).toFloat()
+            }
+        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(10) })
+        val trackTitle = TextView(this).apply {
+            text = "Midnight Drive"
             textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setTextColor(if (current == "futuristic") 0xFF80E9FF.toInt() else Color.WHITE)
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            setTextColor(style.primary)
+        }
+        val artist = TextView(this).apply {
+            text = "Artist  ·  Playing"
+            textSize = 11f
+            setTextColor(style.secondary)
+        }
+        val copy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(trackTitle)
+            addView(artist)
+        }
+        preview.addView(copy, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         preview.addView(TextView(this).apply {
-            text = glow
-            textSize = 9f
-            letterSpacing = 0.06f
-            setTextColor(if (current == "futuristic") 0xFF43D9FF.toInt() else 0xFFB6C1D0.toInt())
+            text = "◁   ●   ▷"
+            textSize = 12f
+            setTextColor(style.accent)
+            contentDescription = "Preview playback controls"
         })
         parent.addView(preview)
         parent.addView(TextView(this).apply {
-            text = "Live style preview · applies to the floating pill and expanded panel"
+            text = "${style.label} · preview of the expanded media pill"
             textSize = 11f
             setTextColor(secondaryTextColor())
             setPadding(dp(2), 0, 0, dp(5))
@@ -941,27 +1166,19 @@ class MainActivity : Activity() {
     }
 
     private fun themeButton(parent: LinearLayout) {
-        val themes = listOf("black", "frosted", "futuristic", "ios", "accent")
-        val names = mapOf(
-            "black" to "Classic Black",
-            "frosted" to "Frosted Glass",
-            "futuristic" to "Futuristic Cyan",
-            "ios" to "iOS Inspired",
-            "accent" to "Accent Outline"
-        )
-        val labels = themes.map { names[it] ?: it }.toTypedArray()
-        fun selectedTheme() = (prefs.getString("theme", "black") ?: "black")
-            .takeIf { it in themes } ?: "black"
-        fun label(t: String) = "Pill theme: ${names[t] ?: names["black"]}"
+        val themes = PillStyles.ids
+        val labels = themes.map { PillStyles.palette(it).label }.toTypedArray()
+        fun selectedTheme() = PillStyles.normalize(prefs.getString("theme", "capsule"))
+        fun label(t: String) = "Pill style: ${PillStyles.palette(t).label}"
         val b = styledButton().apply {
             text = label(selectedTheme())
-            contentDescription = "Choose pill theme"
+            contentDescription = "Choose pill style"
         }
         b.setOnClickListener {
             val current = selectedTheme()
             val selectedIndex = themes.indexOf(current).coerceAtLeast(0)
             AlertDialog.Builder(this)
-                .setTitle("Choose pill theme")
+                .setTitle("Choose pill style")
                 .setSingleChoiceItems(labels, selectedIndex) { dialog, which ->
                     val next = themes[which]
                     prefs.edit().putString("theme", next).apply()
@@ -1019,6 +1236,49 @@ class MainActivity : Activity() {
                 .show()
         }
         parent.addView(button)
+    }
+
+    private fun pillAnimationStyleButton(parent: LinearLayout) {
+        val styles = listOf("liquid_morph", "continuity", "settling_dock")
+        val labels = mapOf(
+            "liquid_morph" to "Liquid morph",
+            "continuity" to "Icon continuity",
+            "settling_dock" to "Settling dock"
+        )
+        val descriptions = arrayOf(
+            "Liquid morph — elastic width and height movement",
+            "Icon continuity — carry the charging icon between sizes",
+            "Settling dock — calm expansion with details unfolding below"
+        )
+        fun selected() = (prefs.getString("pillAnimationStyle", "continuity") ?: "continuity")
+            .takeIf { it in styles } ?: "continuity"
+        fun label(style: String) = "Expansion animation: ${labels[style] ?: labels["continuity"]}"
+        val button = styledButton().apply {
+            text = label(selected())
+            contentDescription = "Choose pill expansion animation style"
+        }
+        button.setOnClickListener {
+            val current = selected()
+            AlertDialog.Builder(this)
+                .setTitle("Pill expansion animation")
+                .setSingleChoiceItems(descriptions, styles.indexOf(current).coerceAtLeast(0)) { dialog, which ->
+                    val next = styles[which]
+                    prefs.edit().putString("pillAnimationStyle", next)
+                        .putBoolean("springMotion", true)
+                        .apply()
+                    button.text = label(next)
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        parent.addView(button)
+        parent.addView(TextView(this).apply {
+            text = "Choose how the pill expands: Liquid morph, Icon continuity, or Settling dock. This changes the pill transition, not the charging icon."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(4), dp(2), dp(8))
+        })
     }
 
     private fun vizStyleButton(parent: LinearLayout) {
@@ -1192,9 +1452,9 @@ class MainActivity : Activity() {
         val mic = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
 
-        status.text = "Overlay: ${if (overlay) "OK" else "missing"}\n" +
-            "Notification access: ${if (listener) "OK" else "missing"}\n" +
-            "Keep-alive: ${if (keepAlive) "OK" else "off"}\n" +
+        status.text = "Overlay: ${if (overlay) "Allowed" else "permission needed"}\n" +
+            "Notification listener: ${if (listener) "enabled" else "permission needed"} · ${if (KeepAlive.listenerConnected) "connected" else "disconnected"}\n" +
+            "Accessibility keep-alive: ${if (keepAlive) "enabled" else "off"} · ${if (KeepAlive.accessibilityConnected) "connected" else "disconnected"}\n" +
             "Brightness control: ${if (brightness) "OK" else "off"}\n" +
             "Do Not Disturb control: ${if (dnd) "OK" else "off"}\n" +
             "App usage access: ${if (usage) "OK" else "off"}\n" +

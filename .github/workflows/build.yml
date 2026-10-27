@@ -30,13 +30,37 @@ jobs:
       - name: Validate source and Android XML
         run: python3 scripts/validate_source.py
 
+      - name: Configure stable debug signing
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.CAPSULE_DEBUG_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.CAPSULE_DEBUG_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.CAPSULE_DEBUG_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.CAPSULE_DEBUG_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "mode=ephemeral" >> "$GITHUB_OUTPUT"
+            echo "::warning::Stable debug signing is not configured. This APK may not install over APKs signed by another CI run."
+            exit 0
+          fi
+          key_path="$RUNNER_TEMP/capsule-lite-debug.keystore"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$key_path"
+          {
+            echo "CAPSULE_DEBUG_KEYSTORE=$key_path"
+            echo "CAPSULE_DEBUG_STORE_PASSWORD=$STORE_PASSWORD"
+            echo "CAPSULE_DEBUG_KEY_ALIAS=$KEY_ALIAS"
+            echo "CAPSULE_DEBUG_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+          echo "mode=stable" >> "$GITHUB_OUTPUT"
+
       - name: Compile debug APK
         run: gradle --no-daemon --stacktrace assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: capsule-lite-v46-debug-apk
+          name: capsule-lite-v50-debug-apk-${{ steps.signing.outputs.mode }}-run-${{ github.run_number }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
