@@ -1155,11 +1155,42 @@ class CapsuleService : NotificationListenerService() {
         return raw.split(',').asSequence().map { it.trim() }.filter { it.isNotEmpty() }.any { it == pkg }
     }
 
+    private val defaultActivityPriority = listOf("live", "notifications", "media", "navigation", "charging")
+
+    private fun activityPriorityOrder(): List<String> {
+        val saved = (prefs.getString("activityPriorityOrder", "") ?: "")
+            .split(",").map { it.trim() }.filter { it in defaultActivityPriority }.distinct()
+        return saved + defaultActivityPriority.filter { it !in saved }
+    }
+
+    private fun liveActivityIsShowing(): Boolean =
+        showingNotif && notifKey != null && (notifKey == liveChronometerKey || notifKey == downloadKey)
+
+    private fun activityWinner(): String? {
+        if (callActive) return "calls"
+        if (stopwatchStart > 0L) return "stopwatch"
+        fun active(name: String): Boolean = when (name) {
+            "live" -> liveActivityIsShowing()
+            "notifications" -> showingNotif && !liveActivityIsShowing()
+            "media" -> showMusic() && controller != null
+            "navigation" -> prefs.getBoolean("mapsInfo", true) && MapsNav.active
+            "charging" -> showCharging() && charging
+            else -> false
+        }
+        return activityPriorityOrder().firstOrNull(::active)
+    }
+
     private fun canPromoteLiveActivity(key: String, incomingPriority: Int): Boolean {
         if (callActive) return false
+        val winner = activityWinner()
+        if (winner == "calls" || winner == "stopwatch") return false
+        if (winner != null && winner != "live") {
+            val order = activityPriorityOrder()
+            return order.indexOf("live") < order.indexOf(winner)
+        }
         val currentKey = when {
-            showingNotif && liveChronometerKey != null && notifKey == liveChronometerKey -> liveChronometerKey
-            showingNotif && downloadKey != null && notifKey == downloadKey -> downloadKey
+            liveChronometerKey != null && notifKey == liveChronometerKey -> liveChronometerKey
+            downloadKey != null && notifKey == downloadKey -> downloadKey
             else -> null
         } ?: return true
         if (currentKey == key) return true
@@ -1512,7 +1543,7 @@ class CapsuleService : NotificationListenerService() {
 
     // True when the expanded pill should show the charging layout (same rule as the old charging text)
     private fun chargeExpandedShown() =
-        charging && showCharging() && !mapsShown() && !(controller != null && showMusic())
+        charging && showCharging() && activityWinner() == "charging"
 
     private fun updateChargeBox() {
         val ma = chargeMa
@@ -3175,18 +3206,19 @@ class CapsuleService : NotificationListenerService() {
         val widgetOn = !qsOn && widgetActive()
         val hideAll = qsOn || widgetOn
         val playing = controller != null && showMusic()
-        val musicOn = !hideAll && expanded && !callActive && !showingNotif && playing
-        val miniMusic = !hideAll && !expanded && !callActive && !showingNotif && playing
+        val winner = activityWinner()
+        val notifOn = !hideAll && showingNotif && winner in setOf("live", "notifications")
+        val musicOn = !hideAll && expanded && !callActive && winner == "media" && playing
+        val miniMusic = !hideAll && !expanded && !callActive && winner == "media" && playing
         val swOn = stopwatchStart > 0
-        val chargeMini = !hideAll && !expanded && !callActive && !showingNotif && !mapsShown() && controller == null && charging && showCharging()
-        val replyOn = !hideAll && expanded && !callActive && showingNotif && notifLevel >= 2 && replyAction != null &&
+        val chargeMini = !hideAll && !expanded && !callActive && winner == "charging" && charging && showCharging()
+        val replyOn = !hideAll && expanded && !callActive && notifOn && notifLevel >= 2 && replyAction != null &&
             prefs.getBoolean("replyChips", true)
-        val actionOn = !hideAll && expanded && !callActive && showingNotif && notifLevel >= 2 && notifActions.isNotEmpty()
+        val actionOn = !hideAll && expanded && !callActive && notifOn && notifLevel >= 2 && notifActions.isNotEmpty()
         val callOn = !hideAll && expanded && callActive
-        val chargeOn = !hideAll && expanded && !callActive && !showingNotif && chargeExpandedShown()
-        val navOn = !hideAll && expanded && mapsShown()
-
-        val notifStackOn = !hideAll && expanded && !callActive && showingNotif && (replyOn || actionOn)
+        val chargeOn = !hideAll && expanded && !callActive && winner == "charging" && chargeExpandedShown()
+        val navOn = !hideAll && expanded && !callActive && winner == "navigation" && mapsShown()
+        val notifStackOn = !hideAll && expanded && !callActive && notifOn && (replyOn || actionOn)
         setMusicLayout(musicOn || notifStackOn)
         qsGrid.visibility = vis(qsOn)
         widgetImage.visibility = vis(widgetOn)
@@ -3479,7 +3511,7 @@ class CapsuleService : NotificationListenerService() {
         if (callActive) {
             title.text = callTitle
             subtitle.text = if (callState == 2) callTimerText() + " \u00B7 Ongoing call" else callSubtitle
-        } else if (!showingNotif) {
+        } else if (!showingNotif || activityWinner() !in setOf("live", "notifications")) {
             renderMedia()
         }
         applyVisibility()
@@ -3637,8 +3669,7 @@ class CapsuleService : NotificationListenerService() {
 
     // Maps info replaces the music text while navigating and no music is playing
     private fun mapsShown(): Boolean =
-        prefs.getBoolean("mapsInfo", true) && MapsNav.active && !callActive && !showingNotif &&
-            !(showMusic() && controller?.playbackState?.state == PlaybackState.STATE_PLAYING)
+        prefs.getBoolean("mapsInfo", true) && MapsNav.active && activityWinner() == "navigation"
 
     private fun renderMedia() {
         if (mapsShown()) {
@@ -3651,9 +3682,9 @@ class CapsuleService : NotificationListenerService() {
             icon.setImageDrawable(appIcon(CapsulePrefs.MAPS_PKG))
             return
         }
-        val c = if (showMusic()) controller else null
+        val c = if (showMusic() && activityWinner() == "media") controller else null
         if (c == null) {
-            if (charging && showCharging()) {
+            if (charging && showCharging() && activityWinner() == "charging") {
                 title.text = "$chargePct% \u00B7 Charging"
                 title.setTextColor(if (lastTempC >= 42.0) 0xFFFF9F0A.toInt() else Color.WHITE)
                 subtitle.text = chargeDetail
@@ -4289,6 +4320,15 @@ class CapsuleService : NotificationListenerService() {
         chargeVolts = voltageMv / 1000.0
         chargeMa = currentUa?.let { (abs(it) / 1000L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() }
         chargeWatts = if (currentUa != null && voltageMv > 0) abs(voltageMv.toDouble() * currentUa.toDouble()) / 1e9 else null
+        ChargingSessionHistory.record(
+            this,
+            charging,
+            chargePct,
+            tempC,
+            chargeVolts,
+            chargeMa?.div(1000.0),
+            chargeWatts
+        )
         if (currentUa != null) {
             val mA = abs(currentUa) / 1000L
             val watts = abs(voltageMv.toDouble() * currentUa.toDouble()) / 1e9
