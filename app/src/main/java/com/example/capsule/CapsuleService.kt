@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 54440)
-Total output lines: 4694
-
 package com.example.capsule
 
 import android.animation.ValueAnimator
@@ -2242,7 +2239,403 @@ class CapsuleService : NotificationListenerService() {
                 // A subsequent animateSize() call will initialise the spring from the current layout.
                 springRunning = false
                 springLast = 0L
-           …4440 tokens truncated…rivate var panelDraggingMusic = false
+                return
+            }
+            if (!motionEnabled()) {
+                // The system animation scale can change while a spring is already running.
+                // Finish at the latest target immediately instead of continuing to animate.
+                val pad = touchPad()
+                lp.width = (springW.target + 0.5f).toInt().coerceAtLeast(miniW + 2 * pad - dp(4))
+                lp.height = (springH.target + 0.5f).toInt().coerceAtLeast(miniH + 2 * pad - dp(4))
+                springW.value = springW.target
+                springH.value = springH.target
+                springW.velocity = 0f
+                springH.velocity = 0f
+                (pill?.background as? GradientDrawable)?.cornerRadius = minOf(
+                    (lp.height - 2 * pad) / 2f,
+                    dp(if (expanded) pillStyle().cornerDp else 40).toFloat()
+                )
+                runCatching { wm.updateViewLayout(r, lp) }
+                syncPanelY()
+                springRunning = false
+                springLast = 0L
+                return
+            }
+            val dt = if (springLast == 0L) 1f / 60f
+            else ((frameTimeNanos - springLast) / 1_000_000_000f).coerceIn(0f, 0.05f)
+            springLast = frameTimeNanos
+            // Width leads height to create a liquid stretch. Presets tune response time without changing the shape.
+            val speed = prefs.getString("springSpeed", "medium") ?: "medium"
+            val (widthResponse, heightResponse, damping) = if (pillAnimationStyle() == "settling_dock") {
+                Triple(0.52f, 0.58f, 0.96f)
+            } else {
+                when (speed) {
+                    "fast" -> Triple(0.31f, 0.38f, 0.84f)
+                    "slow" -> Triple(0.60f, 0.70f, 0.84f)
+                    else -> Triple(0.42f, 0.50f, 0.84f)
+                }
+            }
+            springW.step(dt, widthResponse, damping)
+            springH.step(dt, heightResponse, damping)
+            val done = springW.settled(0.6f) && springH.settled(0.6f)
+            if (done) {
+                springW.value = springW.target
+                springH.value = springH.target
+                springW.velocity = 0f
+                springH.velocity = 0f
+            }
+            val pad = touchPad()
+            // Never smaller than the camera hole, even in the small bounce at the end of a collapse
+            lp.width = (springW.value + 0.5f).toInt().coerceAtLeast(miniW + 2 * pad - dp(4))
+            lp.height = (springH.value + 0.5f).toInt().coerceAtLeast(miniH + 2 * pad - dp(4))
+            (pill?.background as? GradientDrawable)?.cornerRadius = minOf(
+                (lp.height - 2 * pad) / 2f,
+                dp(if (expanded) pillStyle().cornerDp else 40).toFloat()
+            )
+            if (r.isAttachedToWindow) runCatching { wm.updateViewLayout(r, lp) }
+            syncPanelY()
+            if (done) {
+                springRunning = false
+                springLast = 0L
+            } else {
+                android.view.Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+    }
+
+    private fun stopSpring() {
+        android.view.Choreographer.getInstance().removeFrameCallback(springFrame)
+        springRunning = false
+        springLast = 0L
+    }
+
+    private fun animateSize() {
+        val r = root ?: return
+        val pad = touchPad()
+        val toW = (if (expanded) expW else if (mapsShown() || callCompact()) dp(240) else miniW) + 2 * pad
+        val toH = (if (expanded) targetInnerH() else miniH) + 2 * pad
+        if (!motionEnabled()) {
+            // Motion disabled in app settings or system settings: jump straight to the new size
+            stopSpring()
+            lp.width = toW
+            lp.height = toH
+            (pill?.background as? GradientDrawable)?.cornerRadius = minOf(
+                (lp.height - 2 * pad) / 2f,
+                dp(if (expanded) pillStyle().cornerDp else 40).toFloat()
+            )
+            if (r.isAttachedToWindow) runCatching { wm.updateViewLayout(r, lp) }
+            syncPanelY()
+            return
+        }
+        if (!springRunning) {
+            springW.value = lp.width.toFloat()
+            springW.velocity = 0f
+            springH.value = lp.height.toFloat()
+            springH.velocity = 0f
+        }
+        springW.target = toW.toFloat()
+        springH.target = toH.toFloat()
+        if (!springRunning) {
+            springRunning = true
+            springLast = 0L
+            android.view.Choreographer.getInstance().postFrameCallback(springFrame)
+        }
+    }
+
+    // ---------- content change ----------
+    private var lastSnapAt = 0L
+    private var lastStaggerAt = 0L
+    private var snapView: ImageView? = null
+    private var snapBitmap: Bitmap? = null
+    private var snapBlurAnimator: ValueAnimator? = null
+
+    // Clean up both snapshot animation systems together. ViewPropertyAnimator and the independent
+    // RenderEffect ValueAnimator do not cancel each other, so a superseded snapshot must stop both.
+    private fun clearSnapshot(expected: ImageView? = null) {
+        val current = snapView ?: return
+        if (expected != null && current !== expected) return
+        snapBlurAnimator?.cancel()
+        snapBlurAnimator = null
+        current.animate().cancel()
+        if (android.os.Build.VERSION.SDK_INT >= 31) current.setRenderEffect(null)
+        current.setImageDrawable(null)
+        (current.parent as? android.view.ViewGroup)?.removeView(current)
+        if (snapView === current) snapView = null
+        snapBitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
+        snapBitmap = null
+    }
+
+    // RenderEffect blur uses independent ValueAnimators, so ViewPropertyAnimator.cancel() alone
+    // cannot cancel them when a content transition is superseded.
+    private val blurAnimators = java.util.WeakHashMap<View, ValueAnimator>()
+
+    // Service teardown can happen while delayed entrance or blur animations are queued.
+    // Cancel the whole view tree so callbacks cannot keep mutating a detached overlay.
+    private fun clearAnimationsRecursively(view: View) {
+        view.animate().cancel()
+        blurAnimators.remove(view)?.cancel()
+        if (android.os.Build.VERSION.SDK_INT >= 31) view.setRenderEffect(null)
+        if (view is android.view.ViewGroup) {
+            for (index in 0 until view.childCount) clearAnimationsRecursively(view.getChildAt(index))
+        }
+    }
+
+    // A picture of what the pill shows now (without its black background). The old content blurs, shrinks
+    // and fades out on top of the pill while the new content comes in underneath.
+    private fun snapshotOld() {
+        if (pillAnimationStyle() == "settling_dock") {
+            clearSnapshot()
+            return
+        }
+        if (chargeFlightPending) return
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        if (!motionEnabled()) {
+            // If motion was disabled while a prior snapshot was fading out, remove it immediately.
+            clearSnapshot()
+            return
+        }
+        val p = pill ?: run { clearSnapshot(); return }
+        val r = root as? FrameLayout ?: return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastSnapAt < 80 || p.width <= 0 || p.height <= 0 || !r.isAttachedToWindow) return
+        lastSnapAt = now
+        runCatching {
+            clearSnapshot()
+            val bmp = Bitmap.createBitmap(p.width, p.height, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bmp)
+            for (i in 0 until p.childCount) {
+                val v = p.getChildAt(i)
+                if (v.visibility != View.VISIBLE) continue
+                canvas.save()
+                canvas.translate(v.left.toFloat(), v.top.toFloat())
+                v.draw(canvas)
+                canvas.restore()
+            }
+            val iv = ImageView(uiCtx).apply {
+                setImageBitmap(bmp)
+                layoutParams = FrameLayout.LayoutParams(p.width, p.height, Gravity.CENTER)
+            }
+            r.addView(iv)
+            snapView = iv
+            snapBitmap = bmp
+            iv.animate()
+                .alpha(0f)
+                .scaleX(0.88f)
+                .scaleY(0.88f)
+                .setDuration(140)
+                .setInterpolator(android.view.animation.AccelerateInterpolator(1.1f))
+                .withEndAction { clearSnapshot(iv) }
+                .start()
+            snapBlurAnimator = ValueAnimator.ofFloat(0.1f, 8f).apply {
+                duration = 140
+                addUpdateListener {
+                    if (snapView !== iv || !iv.isAttachedToWindow) return@addUpdateListener
+                    val radius = it.animatedValue as Float
+                    iv.setRenderEffect(
+                        android.graphics.RenderEffect.createBlurEffect(radius, radius, android.graphics.Shader.TileMode.CLAMP)
+                    )
+                }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        if (snapBlurAnimator === animation) snapBlurAnimator = null
+                        if (snapView === iv && android.os.Build.VERSION.SDK_INT >= 31) iv.setRenderEffect(null)
+                    }
+                })
+                start()
+            }
+        }
+    }
+
+    // The new content grows in from slightly small and blurry, one part after another, with a small overshoot
+    private fun blurIn(v: View, delay: Long) {
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        blurAnimators.remove(v)?.cancel()
+        val animator = ValueAnimator.ofFloat(14f, 0f).apply {
+            startDelay = delay
+            duration = 300
+            addUpdateListener {
+                val radius = it.animatedValue as Float
+                v.setRenderEffect(
+                    if (radius < 0.5f) null
+                    else android.graphics.RenderEffect.createBlurEffect(radius, radius, android.graphics.Shader.TileMode.CLAMP)
+                )
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    v.setRenderEffect(null)
+                    if (blurAnimators[v] === animation) blurAnimators.remove(v)
+                }
+            })
+        }
+        blurAnimators[v] = animator
+        animator.start()
+    }
+
+    // ---------- microphone visualizer ----------
+    // Reads the microphone only to measure sound levels. Audio is never saved or sent anywhere.
+    // It reacts to sound the microphone can hear, such as music from the speaker. Headphones won't drive it.
+
+    private fun syncMic() {
+        // The visualizer is only useful while the pill is visible. Stop microphone capture while the
+        // display is off; the next foreground tick will restart it when appropriate.
+        val screenInteractive = runCatching {
+            getSystemService(android.os.PowerManager::class.java).isInteractive
+        }.getOrDefault(true)
+        val wants = screenInteractive && prefs.getBoolean("visualizer", false) && pill != null &&
+            !callActive && !showingNotif && showMusic() &&
+            controller?.playbackState?.state == PlaybackState.STATE_PLAYING
+        if (!wants) {
+            if (micRunning || ambientRunning) {
+                stopMic()
+                applyVisibility()
+            }
+            return
+        }
+        if (headphonesConnected()) {
+            if (micRunning) stopMic()
+            if (!ambientRunning) {
+                ambientRunning = true
+                startViz()
+                applyVisibility()
+            }
+        } else {
+            ambientRunning = false
+            if (!micRunning) {
+                startMic()
+                applyVisibility()
+            }
+        }
+    }
+
+    // A notification, call, or phone event makes the bars jump; the jump fades out over about a second
+    private fun boostViz() {
+        if (!prefs.getBoolean("vizNotif", true)) return
+        boostAt = SystemClock.uptimeMillis()
+    }
+
+    private fun startViz() {
+        if (vizLoop) return
+        vizLoop = true
+        handler.post(vizRunnable)
+    }
+
+    // Earphones, wired headsets, or Bluetooth audio: the microphone can't pick up their sound
+    private fun headphonesConnected(): Boolean {
+        val am = getSystemService(AudioManager::class.java)
+        return am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+        }
+    }
+
+    private fun stopMic() {
+        micRunning = false
+        ambientRunning = false
+    }
+
+    private fun startMic() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        micRunning = true
+        Thread {
+            val rate = 44100
+            val n = 1024
+            val rec = try {
+                AudioRecord(
+                    MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    maxOf(AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT), n * 2)
+                )
+            } catch (e: Exception) {
+                micRunning = false
+                return@Thread
+            }
+            if (rec.state != AudioRecord.STATE_INITIALIZED) {
+                micRunning = false
+                rec.release()
+                return@Thread
+            }
+            val buf = ShortArray(n)
+            val freqs = doubleArrayOf(120.0, 300.0, 700.0, 1600.0, 3500.0)   // one per bar: bass to treble
+            var peak = 1.0
+            try {
+                rec.startRecording()
+                while (micRunning) {
+                    val read = rec.read(buf, 0, n)
+                    if (read <= 0) continue
+                    val power = DoubleArray(5) { i -> Math.sqrt(maxOf(0.0, goertzel(buf, read, freqs[i], rate.toDouble()))) }
+                    peak = maxOf(power.maxOrNull() ?: 0.0, peak * 0.98)
+                    for (i in 0 until 5) barLevels[i] = (power[i] / peak).toFloat().coerceIn(0f, 1f)
+                }
+            } catch (e: Exception) {
+                micRunning = false
+            } finally {
+                runCatching { rec.stop() }
+                rec.release()
+            }
+        }.start()
+        startViz()
+    }
+
+    // Power at one frequency (Goertzel algorithm): cheap enough to run on a phone many times a second
+    private fun goertzel(buf: ShortArray, n: Int, freq: Double, rate: Double): Double {
+        val k = Math.round(n * freq / rate).toDouble()
+        val coeff = 2.0 * Math.cos(2.0 * Math.PI * k / n)
+        var s1 = 0.0
+        var s2 = 0.0
+        for (i in 0 until n) {
+            val s0 = buf[i] + coeff * s1 - s2
+            s2 = s1
+            s1 = s0
+        }
+        return s1 * s1 + s2 * s2 - coeff * s1 * s2
+    }
+
+    private val vizRunnable = object : Runnable {
+        override fun run() {
+            if ((!micRunning && !ambientRunning) || pill == null) {
+                vizLoop = false
+                return
+            }
+            if (!micRunning) {
+                // Earphones: generated motion, not the real sound
+                val t = SystemClock.uptimeMillis() / 1000.0
+                for (i in 0 until 5) {
+                    val v = 0.5 + 0.25 * Math.sin(t * (2.1 + i * 0.7) + i * 1.3) +
+                        0.25 * Math.sin(t * (4.3 + i * 1.1) + i)
+                    barLevels[i] = v.toFloat().coerceIn(0f, 1f)
+                }
+            }
+            val style = prefs.getString("vizStyle", "bars") ?: "bars"
+            val fade = (1f - (SystemClock.uptimeMillis() - boostAt) / 900f).coerceIn(0f, 1f)
+            for ((i, b) in bars.withIndex()) {
+                val lv = minOf(1f, barLevels[i] + fade * mirrorWeights[i])
+                smoothed[i] += (lv - smoothed[i]) * 0.3f
+                val (w, h) = when (style) {
+                    "mirror" -> dp(3) to dp(3) + (lv * mirrorWeights[i] * dp(16)).toInt()
+                    "dots" -> dp(6) to dp(6)
+                    "wave" -> dp(3) to dp(3) + (smoothed[i] * dp(16)).toInt()
+                    else -> dp(3) to dp(3) + (lv * dp(14)).toInt()
+                }
+                b.alpha = if (style == "dots") 0.25f + 0.75f * lv else 1f
+                b.layoutParams = LinearLayout.LayoutParams(w, h).apply { marginStart = dp(2) }
+                b.requestLayout()
+            }
+            handler.postDelayed(this, 80)
+        }
+    }
+
+    // ---------- control panel (stage 2) ----------
+    // A separate panel that opens from a gesture: music at the top, brightness and volume bars,
+    // and a grid of tiles with Favourites and All pages.
+
+    private var panelOpen = false
+    private var panelRoot: FrameLayout? = null
+    private var panelParams: WindowManager.LayoutParams? = null
+    private var panelAnim: ValueAnimator? = null
+    private var panelLeaving: FrameLayout? = null   // a panel that is still shrinking back into the pill
+    private var panelDraggingMusic = false
     private var panelDraggingVolume = false
     private lateinit var pMusicCard: LinearLayout
     private lateinit var pArt: ImageView
@@ -4298,4 +4691,3 @@ class CapsuleService : NotificationListenerService() {
         refreshMedia()
     }
 }
-
