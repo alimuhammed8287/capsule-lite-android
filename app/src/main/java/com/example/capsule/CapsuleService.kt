@@ -2554,7 +2554,8 @@ class CapsuleService : NotificationListenerService() {
             clearSnapshot()
             return
         }
-        if (chargeFlightPending || mediaArtFlightPending) return
+        if (chargeFlightPending) return
+        if (mediaArtFlightPending) return
         if (android.os.Build.VERSION.SDK_INT < 31) return
         if (!motionEnabled()) {
             // If motion was disabled while a prior snapshot was fading out, remove it immediately.
