@@ -226,7 +226,7 @@ class MainActivity : Activity() {
                     letterSpacing = -0.035f
                 })
                 addView(TextView(this@MainActivity).apply {
-                    text = if (cat == null) "FLOATING COMPANION  ·  V1.4.0" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
+                    text = if (cat == null) "FLOATING COMPANION  ·  V1.4.1" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
                     textSize = 10f
                     letterSpacing = 0.08f
                     setTextColor(secondaryTextColor())
@@ -832,6 +832,7 @@ class MainActivity : Activity() {
         themePreview(look)
         fontButton(look)
         themeButton(look)
+        pillAnimationStyleButton(look)
         look.addView(TextView(this).apply {
             text = "Style-inspired presets change the pill's surface, accent, shape, and playback controls."
             textSize = 12f
@@ -851,7 +852,6 @@ class MainActivity : Activity() {
 
         val motion = card("Motion")
         motionPresetButton(motion)
-        pillAnimationStyleButton(motion)
         toggle(motion, "Reduce motion (short, non-staggered transitions)", "reduceMotion", false)
 
         val blur = card("Frosted glass")
@@ -1245,15 +1245,15 @@ class MainActivity : Activity() {
         )
         fun selected() = (prefs.getString("pillAnimationStyle", "continuity") ?: "continuity")
             .takeIf { it in styles } ?: "continuity"
-        fun label(style: String) = "Pill animation: ${labels[style] ?: labels["continuity"]}"
+        fun label(style: String) = "Expansion animation: ${labels[style] ?: labels["continuity"]}"
         val button = styledButton().apply {
             text = label(selected())
-            contentDescription = "Choose pill animation style"
+            contentDescription = "Choose pill expansion animation style"
         }
         button.setOnClickListener {
             val current = selected()
             AlertDialog.Builder(this)
-                .setTitle("Pill animation style")
+                .setTitle("Pill expansion animation")
                 .setSingleChoiceItems(descriptions, styles.indexOf(current).coerceAtLeast(0)) { dialog, which ->
                     val next = styles[which]
                     prefs.edit().putString("pillAnimationStyle", next)
@@ -1267,7 +1267,7 @@ class MainActivity : Activity() {
         }
         parent.addView(button)
         parent.addView(TextView(this).apply {
-            text = "Switch between elastic morphing, shared icon continuity, and a calmer unfolding motion."
+            text = "Choose how the pill expands: Liquid morph, Icon continuity, or Settling dock. This changes the pill transition, not the charging icon."
             textSize = 12f
             setTextColor(secondaryTextColor())
             setPadding(dp(2), dp(4), dp(2), dp(8))

@@ -1059,11 +1059,7 @@ class CapsuleService : NotificationListenerService() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), dp(8), dp(8), dp(8))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(if (pillStyle().id == "nothing") 10 else 18).toFloat()
-                setColor((0x20 shl 24) or (pillStyle().accent and 0x00FFFFFF))
-                setStroke(dp(1), pillStyle().outline)
-            }
+            background = themedSurface(if (pillStyle().id == "nothing") 10 else pillStyle().cornerDp)
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                 .apply { topMargin = dp(8) }
             visibility = View.GONE
@@ -1124,10 +1120,7 @@ class CapsuleService : NotificationListenerService() {
             minHeight = dp(40)
             minWidth = dp(60)
             setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = GradientDrawable().apply {
-                setColor(pillStyle().control)
-                cornerRadius = dp(14).toFloat()
-            }
+            background = mediaControlBackground()
             setOnClickListener { dismissMediaNotification() }
         }
         mediaNotificationCard.addView(mediaNotificationContent)
@@ -2515,6 +2508,9 @@ class CapsuleService : NotificationListenerService() {
     // Expanded height depends on what the pill is showing: grid, music, notification or call, or charging
     private fun targetInnerH(): Int {
         if (lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true)) return miniH
+        // Collapsed notification state is represented only by the count badge. Never let the
+        // queued notification's text/action height keep the compact pill expanded vertically.
+        if (!expanded) return miniH
         if (showingNotif && !callActive && !shouldShowMediaWithNotification()) {
             val body = subtitle.text?.toString().orEmpty()
             val widthDp = (expW / resources.displayMetrics.density).toInt().coerceAtLeast(180)
@@ -3954,7 +3950,9 @@ class CapsuleService : NotificationListenerService() {
         val winner = activityWinner()
         val mediaWithNotification = !hideAll && shouldShowMediaWithNotification()
         if (mediaWithNotification) renderMedia()
-        val notifOn = !hideAll && showingNotif && winner in setOf("live", "notifications") && !mediaWithNotification
+        // Notification details belong to an expanded surface. In compact mode, keep only the
+        // count badge; rendering title/actions there competes with the charging/media indicators.
+        val notifOn = !hideAll && expanded && showingNotif && winner in setOf("live", "notifications") && !mediaWithNotification
         val musicOn = !hideAll && expanded && !callActive && playing &&
             (winner == "media" || mediaWithNotification)
         val miniMusic = !hideAll && !expanded && !callActive && winner == "media" && playing
