@@ -35,7 +35,7 @@ checks = {
     "completion handoff": "finishLiveActivity" in service and "restoreNextLiveActivity" in service,
     "reduced motion setting": '"reduceMotion"' in main and '"reduceMotion"' in service,
     "CI builds debug APK": "assembleDebug" in workflow,
-    "CI artifact v46": "capsule-lite-v46-debug-apk" in workflow,
+    "CI artifact name includes unique Actions run number": "capsule-lite-v46-debug-apk-run-${{ github.run_number }}" in workflow,
     "secondary charging overlay removed": all(token not in service for token in ("chargeRoot", "chargeWindow", "updateSeparateChargingPill", "separateChargePill")) and "Separate pill gestures" not in main,
     "compact and expanded charging use the same selected icon": "miniChargeRing = ChargeRingView" in service and "chargeRing = ChargeRingView" in service and service.count('getInt("chargeIconShape", 0)') >= 2,
     "charging icon uses a shared interruptible continuity transition": all(token in service for token in ("prepareChargeIconFlight", "startChargeIconFlight", "chargeFlightRect", "ValueAnimator.ofFloat(0f, 1f)", "destination.getLocationOnScreen(targetLoc)", "cancelChargeIconFlight(keepImage = true)")) and "if (chargeFlightPending) return" in service,
