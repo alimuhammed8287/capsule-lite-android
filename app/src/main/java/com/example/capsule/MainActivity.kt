@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Color
 import android.content.ComponentName
+import android.content.ClipData
 import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -20,6 +21,8 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import org.json.JSONObject
+import androidx.core.content.FileProvider
+import java.io.File
 
 class MainActivity : Activity() {
 
@@ -79,7 +82,8 @@ class MainActivity : Activity() {
     }
 
     private val titles = mapOf(
-        "setup" to "Setup and diagnostics",
+        "setup" to "Setup and recovery",
+        "diagnostics" to "Diagnostic log",
         "pill" to "Pill",
         "music" to "Music",
         "notifications" to "Notifications",
@@ -93,11 +97,12 @@ class MainActivity : Activity() {
 
     private val sectionDescriptions = mapOf(
         "setup" to "Check permissions, service health, and recovery options.",
+        "diagnostics" to "Review, copy, or share a diagnostic report.",
         "pill" to "Tune size, placement, gestures, and when the pill appears.",
         "music" to "Choose playback controls and visualizer behaviour.",
         "notifications" to "Control notification visibility, live activities, and replies.",
         "quick" to "Personalise quick controls, tiles, and pinned apps.",
-        "charging" to "Customise charging status, animation, and the separate pill.",
+        "charging" to "Customise charging status, animation, and session summaries.",
         "look" to "Choose colours, typography, glass styling, and motion.",
         "privacy" to "Manage hidden apps and on-device notification history.",
         "tools" to "Back up settings, restore a configuration, or reset preferences."
@@ -246,6 +251,7 @@ class MainActivity : Activity() {
         when (cat) {
             null -> buildHome()
             "setup" -> buildSetup()
+            "diagnostics" -> buildDiagnostics()
             "pill" -> buildPill()
             "music" -> buildMusic()
             "notifications" -> buildNotifications()
@@ -268,17 +274,122 @@ class MainActivity : Activity() {
     }
 
     private fun showDiagnostics() {
-        if (!::diagText.isInitialized) return
-        val log = DiagLog.lastLines(this, 300)
-        diagText.text = log.ifEmpty { "no service events yet" }
-        if (::repairText.isInitialized) {
-            repairText.text = "Accessibility keep-alive: " + (if (KeepAlive.isAccessibilityEnabled(this)) "on" else "OFF") +
-                "\nAutomatic repair: " + when {
-                    !prefs.getBoolean("autoRepairServices", false) -> "off (opt-in switch is off)"
-                    !KeepAlive.canSelfRepair(this) -> "enabled, but optional ADB permission is missing"
-                    else -> "enabled"
-                } + "\nShowing the last 300 lines. Copy gives everything."
+        if (::diagText.isInitialized) {
+            val log = DiagLog.lastLines(this, 300)
+            diagText.text = log.ifEmpty { "No service events recorded yet." }
         }
+        if (::repairText.isInitialized) {
+            val listenerEnabled = KeepAlive.isListenerEnabled(this)
+            val listenerConnected = KeepAlive.listenerConnected
+            val accessibilityEnabled = KeepAlive.isAccessibilityEnabled(this)
+            val accessibilityConnected = KeepAlive.accessibilityConnected
+            repairText.text = buildString {
+                append("Notification listener: ")
+                    .append(if (listenerEnabled && listenerConnected) "Connected" else if (listenerEnabled) "Enabled, not connected" else "Permission needed")
+                    .append('\n')
+                append("Accessibility keep-alive: ")
+                    .append(if (accessibilityEnabled && accessibilityConnected) "Connected" else if (accessibilityEnabled) "Enabled, not connected" else "Permission needed")
+                    .append('\n')
+                append("Overlay: ").append(if (Settings.canDrawOverlays(this@MainActivity)) "Allowed" else "Permission needed")
+                    .append('\n')
+                append("Automatic repair: ").append(when {
+                    !prefs.getBoolean("autoRepairServices", false) -> "off"
+                    !KeepAlive.canSelfRepair(this@MainActivity) -> "on, but optional ADB permission is missing"
+                    else -> "on"
+                }).append('\n')
+                append("Next step: ").append(when {
+                    !Settings.canDrawOverlays(this@MainActivity) -> "allow Display over other apps"
+                    !listenerEnabled -> "enable Notification access"
+                    !listenerConnected -> "tap Try reconnect, then reopen Capsule if it stays disconnected"
+                    !accessibilityEnabled -> "enable the optional keep-alive in Accessibility settings"
+                    else -> "refresh diagnostics if the pill is still missing"
+                })
+            }
+        }
+    }
+
+    private fun reconnectServices() {
+        when {
+            !Settings.canDrawOverlays(this) -> {
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            }
+            !KeepAlive.isListenerEnabled(this) -> {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+            else -> {
+                runCatching { NotificationListenerService.requestRebind(ComponentName(this, CapsuleService::class.java)) }
+                KeepAlive.schedule(this, 1_000L)
+                android.widget.Toast.makeText(this, "Reconnect requested. Refresh in a moment.", android.widget.Toast.LENGTH_SHORT).show()
+                showDiagnostics()
+            }
+        }
+    }
+
+    private fun buildDiagnostics() {
+        val health = card("Service health")
+        health.addView(status)
+        repairText = TextView(this).apply {
+            textSize = 13f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(6), dp(2), dp(6), dp(8))
+        }
+        health.addView(repairText)
+        button(health, "Try reconnect") { reconnectServices() }
+        button(health, "Refresh status and log") { showDiagnostics() }
+
+        val logCard = card("Recent diagnostic events")
+        diagText = TextView(this).apply {
+            textSize = 11f
+            setTextColor(secondaryTextColor())
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(dp(6), dp(4), dp(6), dp(8))
+        }
+        logCard.addView(diagText)
+        button(logCard, "Copy full diagnostics") { copyDiagnostics() }
+        button(logCard, "Share diagnostics as .txt") { shareDiagnosticsFile() }
+        button(logCard, "Clear diagnostics") {
+            AlertDialog.Builder(this)
+                .setTitle("Clear diagnostic log?")
+                .setMessage("This clears saved event history. It does not change permissions or service settings.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear") { _, _ -> DiagLog.clear(this); showDiagnostics() }
+                .show()
+        }
+        TextView(this).apply {
+            text = "The report contains device details, selected settings, and recent service events. Review it before sharing."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(6), dp(2), dp(6), dp(8))
+        }.also { logCard.addView(it) }
+    }
+
+    private fun shareDiagnosticsFile() {
+        AlertDialog.Builder(this)
+            .setTitle("Share diagnostics?")
+            .setMessage("A .txt file will include device details, saved settings, and recent service events. Only continue if you are comfortable sharing those details.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Continue") { _, _ ->
+                runCatching {
+                    val directory = File(cacheDir, "shared")
+                    directory.mkdirs()
+                    directory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(3)?.forEach { it.delete() }
+                    val file = File(directory, "capsule-lite-diagnostics-${System.currentTimeMillis()}.txt")
+                    file.writeText(DiagLog.report(this), Charsets.UTF_8)
+                    val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                    val share = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "Capsule Lite diagnostics")
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        clipData = ClipData.newUri(contentResolver, "Capsule Lite diagnostics", uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(share, "Share diagnostic file"))
+                }.onFailure {
+                    android.widget.Toast.makeText(this, "Could not share diagnostics: ${it.message ?: "file error"}", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+            .show()
     }
 
     private fun copyDiagnostics() {
@@ -298,7 +409,7 @@ class MainActivity : Activity() {
 
     // The main screen: a short list of categories
     private fun buildHome() {
-        homeTile("⚙", "Setup and diagnostics", "Permissions, service status and troubleshooting", "setup")
+        homeTile("⚙", "Setup and recovery", "Permissions, service status and troubleshooting", "setup")
         homeTile("◉", "Pill appearance", "Size, position, gestures and behaviour", "pill")
         homeTile("♫", "Media player", "Playback controls, visualizer and layout", "music")
         homeTile("▤", "Notifications", "Events, auto-collapse and quick replies", "notifications")
@@ -369,32 +480,25 @@ class MainActivity : Activity() {
     }
 
     private fun buildSetup() {
-        val diag = card("App status and diagnostics")
-        diag.addView(status)
-        repairText = TextView(this).apply { textSize = 13f; setTextColor(secondaryTextColor()) }
-        diag.addView(repairText)
-        diagText = TextView(this).apply {
-            textSize = 11f
+        val health = card("Service health and recovery")
+        health.addView(status)
+        repairText = TextView(this).apply {
+            textSize = 13f
             setTextColor(secondaryTextColor())
-            typeface = Typeface.MONOSPACE
-            setTextIsSelectable(true)
+            setPadding(dp(6), dp(2), dp(6), dp(8))
         }
-        diag.addView(diagText)
-        button(diag, "Copy full diagnostics") { copyDiagnostics() }
-        button(diag, "Refresh") { showDiagnostics() }
-        button(diag, "Clear diagnostics") {
-            DiagLog.clear(this)
-            showDiagnostics()
-        }
-        toggle(diag, "Allow automatic service repair if Android disables it (optional)", "autoRepairServices", false)
+        health.addView(repairText)
+        button(health, "Try reconnect") { reconnectServices() }
+        button(health, "Open diagnostic details") { open("diagnostics") }
+        toggle(health, "Allow automatic service repair if Android disables it (optional)", "autoRepairServices", false)
         TextView(this).apply {
-            text = "Automatic repair is off by default. If you enable it, the optional ADB permission is also required. Turning this off prevents Capsule from re-enabling services you deliberately disabled."
+            text = "Repair is opt-in. Android still requires you to grant or restore permissions in Settings."
             textSize = 12f
             setTextColor(secondaryTextColor())
             setPadding(dp(8), dp(2), dp(8), dp(8))
-        }.also { diag.addView(it) }
-        button(diag, "Copy optional ADB permission command") { copyRepairCommand() }
-        toggle(diag, "Keep-running notification (helps Android keep Capsule alive)", "keepNotif", true)
+        }.also { health.addView(it) }
+        button(health, "Copy optional ADB permission command") { copyRepairCommand() }
+        toggle(health, "Keep-running notification (helps Android keep Capsule alive)", "keepNotif", true)
 
         val perms = card("Permissions")
         button(perms, "1. Display over other apps") {
@@ -470,6 +574,7 @@ class MainActivity : Activity() {
         toggle(shown, "Phone events (unlock, headphones, Bluetooth)", "showEvents", true)
         toggle(shown, "Downloads and progress activities", "showDownloads", true)
         toggle(shown, "Live timer and stopwatch notifications", "liveActivities", true)
+        activityPriorityButton(shown)
         val liveApps = EditText(this).apply {
             hint = "Optional live-activity allow-list (package names, comma separated; blank = all apps)"
             contentDescription = "Live-activity app allow-list, comma-separated package names"
@@ -492,6 +597,100 @@ class MainActivity : Activity() {
         val heights = card("Heights")
         slider(heights, "Height: notifications and calls", "expH_notif", 40, 120, 64)
         slider(heights, "Height: notification with buttons", "expH_stack", 40, 160, 104)
+    }
+
+    private fun activityPriorityButton(parent: LinearLayout) {
+        val ids = listOf("live", "notifications", "media", "navigation", "charging")
+        val names = mapOf(
+            "live" to "Live timers and downloads",
+            "notifications" to "Other notifications",
+            "media" to "Media",
+            "navigation" to "Navigation",
+            "charging" to "Charging"
+        )
+        fun order(): MutableList<String> {
+            val saved = (prefs.getString("activityPriorityOrder", "") ?: "")
+                .split(",").map { it.trim() }.filter { it in ids }.distinct()
+            return (saved + ids.filter { it !in saved }).toMutableList()
+        }
+        fun label(values: List<String>) = "Activity priority: " +
+            (listOf("Calls (fixed)") + values.mapNotNull { names[it] }).joinToString("  ›  ")
+        val button = styledButton().apply {
+            text = label(order())
+            contentDescription = "Arrange activity priority"
+        }
+        button.setOnClickListener {
+            val values = order()
+            val rows = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(18), dp(6), dp(18), dp(4))
+            }
+            lateinit var dialog: AlertDialog
+            fun redraw() {
+                rows.removeAllViews()
+                values.forEachIndexed { index, id ->
+                    val row = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        setPadding(0, dp(3), 0, dp(3))
+                    }
+                    row.addView(TextView(this).apply {
+                        text = "${index + 2}. ${names[id]}"
+                        textSize = 14f
+                        setTextColor(primaryTextColor())
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                    }, LinearLayout.LayoutParams(0, dp(48), 1f))
+                    val up = styledButton().apply {
+                        text = "↑"
+                        contentDescription = "Move ${names[id]} up"
+                        isEnabled = index > 0
+                        setOnClickListener {
+                            if (index > 0) {
+                                val previous = values[index - 1]
+                                values[index - 1] = values[index]
+                                values[index] = previous
+                                redraw()
+                            }
+                        }
+                    }
+                    val down = styledButton().apply {
+                        text = "↓"
+                        contentDescription = "Move ${names[id]} down"
+                        isEnabled = index < values.lastIndex
+                        setOnClickListener {
+                            if (index < values.lastIndex) {
+                                val next = values[index + 1]
+                                values[index + 1] = values[index]
+                                values[index] = next
+                                redraw()
+                            }
+                        }
+                    }
+                    row.addView(up, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
+                    row.addView(down, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
+                    rows.addView(row)
+                }
+            }
+            dialog = AlertDialog.Builder(this)
+                .setTitle("Activity priority")
+                .setMessage("Calls and controls you open directly stay on top. Move other activities to choose which one wins when several are active.")
+                .setView(rows)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save") { _, _ ->
+                    prefs.edit().putString("activityPriorityOrder", values.joinToString(",")).apply()
+                    button.text = label(values)
+                }
+                .create()
+            redraw()
+            dialog.show()
+        }
+        parent.addView(button)
+        parent.addView(TextView(this).apply {
+            text = "When activities overlap, Capsule shows the highest item in this order. Calls and manually opened controls remain fixed above it."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(4), dp(2), dp(8))
+        })
     }
 
     private fun buildQuick() {
@@ -546,6 +745,35 @@ class MainActivity : Activity() {
             setTextColor(secondaryTextColor())
             setPadding(dp(2), dp(4), dp(2), dp(6))
         }.also { charge.addView(it) }
+
+        val sessions = card("Charging sessions")
+        val historyText = TextView(this).apply {
+            text = ChargingSessionHistory.summary(this@MainActivity)
+            textSize = 13f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(4), dp(4), dp(4), dp(8))
+        }
+        sessions.addView(historyText)
+        button(sessions, "Refresh session summary") {
+            historyText.text = ChargingSessionHistory.summary(this)
+        }
+        button(sessions, "Clear completed sessions") {
+            AlertDialog.Builder(this)
+                .setTitle("Clear charging history?")
+                .setMessage("This removes completed session summaries stored on this device. An active session will continue to be recorded.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear") { _, _ ->
+                    ChargingSessionHistory.clear(this)
+                    historyText.text = ChargingSessionHistory.summary(this)
+                }
+                .show()
+        }
+        TextView(this).apply {
+            text = "Summaries stay on this device and keep only the latest 20 sessions. Power and temperature are device readings, not battery-health measurements."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(2), dp(2), dp(6))
+        }.also { sessions.addView(it) }
 
     }
 
@@ -1198,9 +1426,9 @@ class MainActivity : Activity() {
         val mic = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
 
-        status.text = "Overlay: ${if (overlay) "OK" else "missing"}\n" +
-            "Notification access: ${if (listener) "OK" else "missing"}\n" +
-            "Keep-alive: ${if (keepAlive) "OK" else "off"}\n" +
+        status.text = "Overlay: ${if (overlay) "Allowed" else "permission needed"}\n" +
+            "Notification listener: ${if (listener) "enabled" else "permission needed"} · ${if (KeepAlive.listenerConnected) "connected" else "disconnected"}\n" +
+            "Accessibility keep-alive: ${if (keepAlive) "enabled" else "off"} · ${if (KeepAlive.accessibilityConnected) "connected" else "disconnected"}\n" +
             "Brightness control: ${if (brightness) "OK" else "off"}\n" +
             "Do Not Disturb control: ${if (dnd) "OK" else "off"}\n" +
             "App usage access: ${if (usage) "OK" else "off"}\n" +
