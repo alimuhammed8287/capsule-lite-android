@@ -226,7 +226,7 @@ class MainActivity : Activity() {
                     letterSpacing = -0.035f
                 })
                 addView(TextView(this@MainActivity).apply {
-                    text = if (cat == null) "FLOATING COMPANION  ·  V1.3.9" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
+                    text = if (cat == null) "FLOATING COMPANION  ·  V1.4.0" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
                     textSize = 10f
                     letterSpacing = 0.08f
                     setTextColor(secondaryTextColor())
@@ -740,7 +740,7 @@ class MainActivity : Activity() {
         chargingStyleButton(charge)
         chargingIconButton(charge)
         TextView(this).apply {
-            text = "Choose from eight animated designs, including One UI-inspired, Pixel-inspired, and glyph-dot styles. The same selection appears in compact and expanded charging views."
+            text = "Choose a charging icon for both pill sizes. The irregular progress ring keeps the bolt still, animates its outline, and leaves a gap for the remaining charge. Charging stat icons follow the selected pill theme."
             textSize = 12f
             setTextColor(secondaryTextColor())
             setPadding(dp(2), dp(4), dp(2), dp(6))
@@ -799,8 +799,8 @@ class MainActivity : Activity() {
     }
 
     private fun chargingIconButton(parent: LinearLayout) {
-        val icons = listOf("One UI battery", "Lightning bolt", "Power plug", "Leaf", "Spark", "Pixel battery", "Nothing glyph dots", "Pixel charge ring")
-        fun selected() = prefs.getInt("chargeIconShape", 0).coerceIn(0, icons.lastIndex)
+        val icons = listOf("One UI battery", "Lightning bolt", "Power plug", "Leaf", "Spark", "Pixel battery", "Nothing glyph dots", "Pixel charge ring", "Irregular progress ring")
+        fun selected() = prefs.getInt("chargeIconShape", 8).coerceIn(0, icons.lastIndex)
         val b = styledButton().apply {
             text = "Charging icon: " + icons[selected()]
             contentDescription = "Choose charging icon design"
