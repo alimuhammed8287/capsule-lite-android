@@ -19,12 +19,14 @@ service = (ROOT / "app/src/main/java/com/example/capsule/CapsuleService.kt").rea
 policy_path = ROOT / "app/src/main/java/com/example/capsule/LiveActivityPolicy.kt"
 policy = policy_path.read_text() if policy_path.exists() else ""
 main = (ROOT / "app/src/main/java/com/example/capsule/MainActivity.kt").read_text()
+history = (ROOT / "app/src/main/java/com/example/capsule/ChargingSessionHistory.kt").read_text()
+manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 charging_icon_match = re.search(r'val icons = listOf\(([^)]*)\)', main)
 charging_icon_names = re.findall(r'"([^"]+)"', charging_icon_match.group(1)) if charging_icon_match else []
 checks = {
-    "versionCode 46": bool(re.search(r"versionCode\s*=\s*46\b", build)),
-    "versionName 1.3.8": 'versionName = "1.3.8"' in build,
+    "versionCode 47": bool(re.search(r"versionCode\s*=\s*47\b", build)),
+    "versionName 1.3.9": 'versionName = "1.3.9"' in build,
     "adaptive ticker": "nextTickDelayMs()" in service,
     "screen-aware visualizer": "isInteractive" in service,
     "live activity classification": "fun classify(sbn: StatusBarNotification)" in policy,
@@ -35,7 +37,7 @@ checks = {
     "completion handoff": "finishLiveActivity" in service and "restoreNextLiveActivity" in service,
     "reduced motion setting": '"reduceMotion"' in main and '"reduceMotion"' in service,
     "CI builds debug APK": "assembleDebug" in workflow,
-    "CI artifact name includes unique Actions run number": "capsule-lite-v46-debug-apk-run-${{ github.run_number }}" in workflow,
+    "CI artifact name includes unique Actions run number": all(token in workflow for token in ("capsule-lite-v47-debug-apk-", "steps.signing.outputs.mode", "github.run_number")),
     "secondary charging overlay removed": all(token not in service for token in ("chargeRoot", "chargeWindow", "updateSeparateChargingPill", "separateChargePill")) and "Separate pill gestures" not in main,
     "compact and expanded charging use the same selected icon": "miniChargeRing = ChargeRingView" in service and "chargeRing = ChargeRingView" in service and service.count('getInt("chargeIconShape", 0)') >= 2,
     "charging icon uses a shared interruptible continuity transition": all(token in service for token in ("prepareChargeIconFlight", "startChargeIconFlight", "chargeFlightRect", "ValueAnimator.ofFloat(0f, 1f)", "destination.getLocationOnScreen(targetLoc)", "cancelChargeIconFlight(keepImage = true)")) and "if (chargeFlightPending) return" in service,
@@ -43,18 +45,18 @@ checks = {
     "charging animation cleanup is safe before overlay initialization": all(token in service for token in ("if (::chargeRing.isInitialized)", "if (::miniChargeRing.isInitialized)", "if (::chargeBox.isInitialized)", "if (::miniRight.isInitialized)")) and "if (::chargeTop.isInitialized && ::chargeBottom.isInitialized)" in service,
     "settling dock unfolds content without the shared icon flight": all(token in service for token in ("settlingDockEntrance", "animateSettlingChargeIcon", ".translationY(0f)", "DecelerateInterpolator(1.3f)")) and 'style == "continuity" && motionEnabled() && prepareChargeIconFlight(e)' in service and 'pillAnimationStyle() == "settling_dock"' in service,
     "charging settings expose main pill and icon selectors": 'Show charging status in the main pill' in main and 'Charging animation:' in main and 'Charging icon:' in main and all(token not in main for token in ("chargePillTap", "chargeMiniW", "chargeMiniH", "chargeMiniYOffset")),
-    "compact Maps suppresses inline charging": "!mapsShown() && controller == null && charging && showCharging()" in service,
+    "charging selection follows the user activity priority": 'winner == "charging" && charging && showCharging()' in service and 'activityWinner() == "charging"' in service,
     "collapsed Maps pill prioritises remaining route distance in leading text": "private fun mapsMiniText(): String = MapsNav.distanceLeft.ifEmpty { MapsNav.turnDistance.ifEmpty { MapsNav.eta.ifEmpty { \"Maps\" } } }" in service,
     "Maps navigation pill enabled by default": 'toggle(shown, "Navigation info in the pill (reads Maps\' navigation notification, and the Maps screen while it is open)", "mapsInfo", true)' in main and 'getBoolean("mapsInfo", true)' in service and 'getBoolean("mapsInfo", false)' not in service,
     "settings switches have readable touch targets": "minHeight = dp(52)" in main and "setTextColor(primaryTextColor())" in main,
-    "diagnostic and save status text follows app theme": "repairText = TextView(this).apply { textSize = 13f; setTextColor(secondaryTextColor()) }" in main and "saveMsg = TextView(this).apply { textSize = 13f; setTextColor(primaryTextColor()) }" in main,
+    "diagnostic and save status text follows app theme": "repairText = TextView(this).apply {" in main and "setTextColor(secondaryTextColor())" in main and "saveMsg = TextView(this).apply { textSize = 13f; setTextColor(primaryTextColor()) }" in main,
     "frosted glass avoids whole-window blur": "flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND" not in service and "translucent, bordered surface" in service,
     "eight charging icon designs are selectable and rendered": len(charging_icon_names) == 8 and all(name in main for name in ("One UI battery", "Pixel battery", "Nothing glyph dots", "Pixel charge ring")) and "selectedShape().coerceIn(0, 7)" in service,
-    "app status is inside diagnostics only": 'if (cat == "setup") col.addView(status)' not in main and "val diag = card(\"App status and diagnostics\")" in main and "diag.addView(status)" in main,
+    "setup opens a separate diagnostic page": 'button(health, "Open diagnostic details") { open("diagnostics") }' in main and '"diagnostics" -> buildDiagnostics()' in main,
     "One UI-inspired home typography and cards": "textSize = 26f" in main and "cornerRadius = dp(24).toFloat()" in main,
     "settings sections have redesigned hierarchy and descriptions": "private fun sectionDescription(title: String)" in main and "text = sectionDescription(title)" in main and "textSize = 15.5f" in main and "bottomMargin = dp(7)" in main,
     "settings redesign has per-section guidance": all(label in main for label in ("Service health, recent events, and troubleshooting details.", "Choose the appearance of the Capsule Lite settings screens.", "Use a translucent layered look with a safe fallback on unsupported devices.")),
-    "settings header shows current redesign version": "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE" in main and "V1.3.8" in main,
+    "settings header shows current redesign version": "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE" in main and "V1.3.9" in main,
     "home tiles have accessible spoken descriptions": 'contentDescription = "$title. $subtitle"' in main and "isFocusable = true" in main,
     "home tile navigation arrows keep light-theme contrast": 'setTextColor(if (isLightAppTheme()) 0xFF64748B.toInt() else 0xFF8CA2B8.toInt())' in main,
     "slider accessibility announces its current value": 'contentDescription = "$label: $start"' in main and 'sb.contentDescription = "$label: $value"' in main,
@@ -76,7 +78,11 @@ checks = {
     "collapsed Maps pill displays remaining route distance": 'distanceLeft.takeIf { it.isNotEmpty() }?.let { "$it left" }' in service,
     "Maps navigation defaults enabled": 'getBoolean("mapsInfo", true)' in service and '"mapsInfo", true)' in main,
 
-    "service status only appears in diagnostics": 'if (cat == "setup") col.addView(status)' not in main and "diag.addView(status)" in main,
+    "diagnostic sharing uses scoped file access": "shareDiagnosticsFile()" in main and "FileProvider.getUriForFile" in main and 'android:exported="false"' in manifest and "shared_file_paths" in manifest and "Share diagnostics as .txt" in main,
+    "diagnostic recovery reports connection state and offers reconnect": all(token in main for token in ("Enabled, not connected", "Next step:", "reconnectServices()", "Open diagnostic details")),
+    "activity priorities can be reordered with calls fixed at the top": all(token in main for token in ("activityPriorityButton(shown)", "Move ", "Calls (fixed)")) and "activityPriorityOrder" in service and 'if (callActive) return "calls"' in service,
+    "charging session summaries are local and bounded": "ChargingSessionHistory.record(" in service and all(token in history for token in ("private const val PREFS", "MAX_SESSIONS = 20", "fun summary(context: Context)", "clear(context: Context)")),
+    "stable debug signing is configurable and artifacts identify ephemeral builds": all(token in workflow for token in ("CAPSULE_DEBUG_KEYSTORE_BASE64", "mode=ephemeral", "mode=stable")) and "hasStableDebugSigning" in build,
 }
 for label, ok in checks.items():
     print(f"{'PASS' if ok else 'FAIL'}: {label}")
