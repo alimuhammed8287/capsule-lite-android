@@ -832,6 +832,21 @@ class MainActivity : Activity() {
         themePreview(look)
         fontButton(look)
         themeButton(look)
+        look.addView(TextView(this).apply {
+            text = "Style-inspired presets change the pill's surface, accent, shape, and playback controls."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(5), dp(2), dp(2))
+        })
+        val lock = card("Lock screen")
+        toggle(lock, "Show the pill on the lock screen", "showOnLockScreen", true)
+        toggle(lock, "Hide notification and call details while locked", "lockScreenPrivacy", true)
+        lock.addView(TextView(this).apply {
+            text = "Android and HyperOS may restrict overlays on a secure lock screen. Capsule keeps notification text hidden until unlock; the system may still choose not to display the overlay."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(4), dp(2), dp(2))
+        })
         slider(look, "Text size (%)", "textScale", 70, 150, 100)
 
         val motion = card("Motion")
@@ -1091,40 +1106,52 @@ class MainActivity : Activity() {
         parent.addView(b)
     }
     private fun themePreview(parent: LinearLayout) {
-        val current = prefs.getString("theme", "black") ?: "black"
-        val (bg, stroke, glow) = when (current) {
-            "frosted" -> Triple(0xCC303641.toInt(), 0x99FFFFFF.toInt(), "FROSTED GLASS")
-            "futuristic" -> Triple(0xFF071827.toInt(), 0xFF43D9FF.toInt(), "FUTURISTIC CYAN")
-            "ios" -> Triple(0xFF34363D.toInt(), 0x66FFFFFF, "iOS INSPIRED")
-            "accent" -> Triple(0xFF08090C.toInt(), accent, "ACCENT OUTLINE")
-            else -> Triple(0xFF030405.toInt(), 0x443FFFFF.toInt(), "CLASSIC BLACK")
-        }
+        val style = PillStyles.palette(prefs.getString("theme", "capsule"))
         val preview = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply {
-                setColor(bg)
-                cornerRadius = dp(30).toFloat()
-                setStroke(dp(if (current == "futuristic" || current == "accent") 2 else 1), stroke)
+                orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                colors = intArrayOf(style.top, style.bottom)
+                cornerRadius = dp(style.cornerDp + 12).toFloat()
+                setStroke(dp(1), style.outline)
             }
-            setPadding(dp(16), dp(13), dp(16), dp(13))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58)).apply { bottomMargin = dp(8) }
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(72)).apply { bottomMargin = dp(8) }
         }
-        preview.addView(TextView(this).apply {
-            text = "●  82%   ·   ◉  ♫"
+        preview.addView(View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(style.accent)
+                cornerRadius = dp(style.artworkCornerDp).toFloat()
+            }
+        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(10) })
+        val trackTitle = TextView(this).apply {
+            text = "Midnight Drive"
             textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setTextColor(if (current == "futuristic") 0xFF80E9FF.toInt() else Color.WHITE)
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            setTextColor(style.primary)
+        }
+        val artist = TextView(this).apply {
+            text = "Artist  ·  Playing"
+            textSize = 11f
+            setTextColor(style.secondary)
+        }
+        val copy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(trackTitle)
+            addView(artist)
+        }
+        preview.addView(copy, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         preview.addView(TextView(this).apply {
-            text = glow
-            textSize = 9f
-            letterSpacing = 0.06f
-            setTextColor(if (current == "futuristic") 0xFF43D9FF.toInt() else 0xFFB6C1D0.toInt())
+            text = "◁   ●   ▷"
+            textSize = 12f
+            setTextColor(style.accent)
+            contentDescription = "Preview playback controls"
         })
         parent.addView(preview)
         parent.addView(TextView(this).apply {
-            text = "Live style preview · applies to the floating pill and expanded panel"
+            text = "${style.label} · preview of the expanded media pill"
             textSize = 11f
             setTextColor(secondaryTextColor())
             setPadding(dp(2), 0, 0, dp(5))
@@ -1132,27 +1159,19 @@ class MainActivity : Activity() {
     }
 
     private fun themeButton(parent: LinearLayout) {
-        val themes = listOf("black", "frosted", "futuristic", "ios", "accent")
-        val names = mapOf(
-            "black" to "Classic Black",
-            "frosted" to "Frosted Glass",
-            "futuristic" to "Futuristic Cyan",
-            "ios" to "iOS Inspired",
-            "accent" to "Accent Outline"
-        )
-        val labels = themes.map { names[it] ?: it }.toTypedArray()
-        fun selectedTheme() = (prefs.getString("theme", "black") ?: "black")
-            .takeIf { it in themes } ?: "black"
-        fun label(t: String) = "Pill theme: ${names[t] ?: names["black"]}"
+        val themes = PillStyles.ids
+        val labels = themes.map { PillStyles.palette(it).label }.toTypedArray()
+        fun selectedTheme() = PillStyles.normalize(prefs.getString("theme", "capsule"))
+        fun label(t: String) = "Pill style: ${PillStyles.palette(t).label}"
         val b = styledButton().apply {
             text = label(selectedTheme())
-            contentDescription = "Choose pill theme"
+            contentDescription = "Choose pill style"
         }
         b.setOnClickListener {
             val current = selectedTheme()
             val selectedIndex = themes.indexOf(current).coerceAtLeast(0)
             AlertDialog.Builder(this)
-                .setTitle("Choose pill theme")
+                .setTitle("Choose pill style")
                 .setSingleChoiceItems(labels, selectedIndex) { dialog, which ->
                     val next = themes[which]
                     prefs.edit().putString("theme", next).apply()
@@ -1441,3 +1460,4 @@ class MainActivity : Activity() {
         }
     }
 }
+
