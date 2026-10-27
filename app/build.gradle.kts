@@ -3,6 +3,14 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val stableDebugStore = System.getenv("CAPSULE_DEBUG_KEYSTORE")
+val stableDebugStorePassword = System.getenv("CAPSULE_DEBUG_STORE_PASSWORD")
+val stableDebugAlias = System.getenv("CAPSULE_DEBUG_KEY_ALIAS")
+val stableDebugKeyPassword = System.getenv("CAPSULE_DEBUG_KEY_PASSWORD")
+val hasStableDebugSigning = listOf(
+    stableDebugStore, stableDebugStorePassword, stableDebugAlias, stableDebugKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.example.capsule"
     compileSdk = 34
@@ -11,8 +19,27 @@ android {
         applicationId = "com.example.capsulelite"
         minSdk = 24
         targetSdk = 34
-        versionCode = 46
-        versionName = "1.3.8"
+        versionCode = 47
+        versionName = "1.3.9"
+    }
+
+    signingConfigs {
+        if (hasStableDebugSigning) {
+            create("stableDebug") {
+                storeFile = file(stableDebugStore!!)
+                storePassword = stableDebugStorePassword
+                keyAlias = stableDebugAlias
+                keyPassword = stableDebugKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            if (hasStableDebugSigning) {
+                signingConfig = signingConfigs.getByName("stableDebug")
+            }
+        }
     }
 
     // NEW: tells the Java compiler to use Java 17
