@@ -867,7 +867,8 @@ class CapsuleService : NotificationListenerService() {
         }
         chargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 8) },
             { chargePct }, { pillStyle().primary }).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(12) }
+            val size = prefs.getInt("chargeRingSize", 48).coerceIn(36, 64)
+            layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).apply { marginStart = dp(12) }
         }
         chargeTime = TextView(uiCtx).apply {
             text = chargeEta
@@ -1166,7 +1167,8 @@ class CapsuleService : NotificationListenerService() {
         notificationNext = queueButton("›", "Next notification") { browseQueuedNotification(1) }
         miniChargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 8) },
             { chargePct }, { pillStyle().primary }).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginStart = dp(8); marginEnd = dp(2) }
+            val size = (prefs.getInt("chargeRingSize", 48).coerceIn(36, 64) * 0.72f).toInt().coerceIn(26, 46)
+            layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).apply { marginStart = dp(8); marginEnd = dp(2) }
             visibility = View.GONE
         }
         row.removeAllViews()
@@ -3494,8 +3496,7 @@ class CapsuleService : NotificationListenerService() {
             clipToOutline = true
             outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
             background = GradientDrawable().apply {
-                // Rounded-square artwork reads like a modern media card rather than a circular crop.
-                cornerRadius = dp(12).toFloat()
+                shape = GradientDrawable.OVAL
                 setColor(0xFF222222.toInt())
             }
             layoutParams = LinearLayout.LayoutParams(dp(56), dp(56))
@@ -3982,7 +3983,7 @@ class CapsuleService : NotificationListenerService() {
             icon.layoutParams = params
         }
         icon.background = GradientDrawable().apply {
-            shape = if (callOn) GradientDrawable.OVAL else GradientDrawable.RECTANGLE
+            shape = if (callOn || musicOn || miniMusic) GradientDrawable.OVAL else GradientDrawable.RECTANGLE
             cornerRadius = dp(pillStyle().artworkCornerDp).toFloat()
             setColor(Color.TRANSPARENT)
         }
@@ -4046,7 +4047,7 @@ class CapsuleService : NotificationListenerService() {
             miniRight.textSize = 12f * k
             miniRight.setTextColor(0xFF30D158.toInt())
         } else {
-            miniRight.text = "⚡ $chargePct%"
+            miniRight.text = "$chargePct%"
             miniRight.textSize = 13f * k
             miniRight.setTextColor(if (lastTempC >= 42.0) 0xFFFF9F0A.toInt() else Color.WHITE)
         }

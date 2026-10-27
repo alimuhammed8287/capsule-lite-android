@@ -226,7 +226,7 @@ class MainActivity : Activity() {
                     letterSpacing = -0.035f
                 })
                 addView(TextView(this@MainActivity).apply {
-                    text = if (cat == null) "FLOATING COMPANION  ·  V1.4.1" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
+                    text = if (cat == null) "FLOATING COMPANION  ·  V1.4.2" else "SETTINGS  ·  PERSONALISE YOUR EXPERIENCE"
                     textSize = 10f
                     letterSpacing = 0.08f
                     setTextColor(secondaryTextColor())
@@ -737,6 +737,13 @@ class MainActivity : Activity() {
         toggle(charge, "Charging alerts (when the charge reaches a level, or is full)", "chargeAlert", true)
         slider(charge, "Alert at charge (%)", "chargeAlertAt", 50, 100, 80)
         slider(charge, "Height: charging", "expH_charge", 40, 120, 64)
+        slider(charge, "Charging ring size (dp)", "chargeRingSize", 36, 64, 48)
+        charge.addView(TextView(this).apply {
+            text = "Changes the irregular charging ring in both pill sizes; the compact ring scales down to keep the battery percentage readable."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(1), dp(2), dp(5))
+        })
         chargingStyleButton(charge)
         chargingIconButton(charge)
         TextView(this).apply {

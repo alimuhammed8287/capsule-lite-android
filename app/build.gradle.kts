@@ -19,8 +19,8 @@ android {
         applicationId = "com.example.capsulelite"
         minSdk = 24
         targetSdk = 34
-        versionCode = 49
-        versionName = "1.4.1"
+        versionCode = 50
+        versionName = "1.4.2"
     }
 
     signingConfigs {
