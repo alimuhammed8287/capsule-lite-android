@@ -277,7 +277,7 @@ class CapsuleService : NotificationListenerService() {
     private val prefs by lazy { getSharedPreferences("capsule", MODE_PRIVATE) }
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == "diag") return@OnSharedPreferenceChangeListener
+        if (key == "diag" || key == "queueStateSummary") return@OnSharedPreferenceChangeListener
         if (key == "testPill") {
             uiPost { runTestPill() }
             return@OnSharedPreferenceChangeListener
@@ -612,7 +612,11 @@ class CapsuleService : NotificationListenerService() {
 
         val row = LinearLayout(uiCtx).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            gravity = if (expanded && prefs.getBoolean("expandFromStatusBar", true)) {
+                Gravity.TOP or Gravity.START
+            } else {
+                Gravity.CENTER_VERTICAL
+            }
             background = themeBackground()
             setOnTouchListener { _, e -> onPillTouch(e) }
         }
@@ -865,7 +869,7 @@ class CapsuleService : NotificationListenerService() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { marginEnd = dp(12) }
         }
-        chargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 8) },
+        chargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 9) },
             { chargePct }, { pillStyle().primary }).apply {
             val size = prefs.getInt("chargeRingSize", 48).coerceIn(36, 64)
             layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).apply { marginStart = dp(12) }
@@ -1060,7 +1064,7 @@ class CapsuleService : NotificationListenerService() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), dp(8), dp(8), dp(8))
-            background = themedSurface(if (pillStyle().id == "nothing") 10 else pillStyle().cornerDp)
+            background = notificationQueueSurface()
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                 .apply { topMargin = dp(8) }
             visibility = View.GONE
@@ -1070,19 +1074,19 @@ class CapsuleService : NotificationListenerService() {
             layoutParams = LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(10) }
         }
         mediaNotificationTitle = TextView(uiCtx).apply {
-            setTextColor(pillStyle().primary)
+            setTextColor(notificationQueueStyle().primary)
             textSize = 13f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         mediaNotificationBody = TextView(uiCtx).apply {
-            setTextColor(pillStyle().secondary)
+            setTextColor(notificationQueueStyle().secondary)
             textSize = 11f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         mediaNotificationPosition = TextView(uiCtx).apply {
-            setTextColor(pillStyle().secondary)
+            setTextColor(notificationQueueStyle().secondary)
             textSize = 10f
             maxLines = 1
         }
@@ -1115,13 +1119,13 @@ class CapsuleService : NotificationListenerService() {
         mediaNotificationDismiss = TextView(uiCtx).apply {
             text = "Dismiss"
             contentDescription = "Dismiss this notification"
-            setTextColor(pillStyle().primary)
+            setTextColor(notificationQueueStyle().primary)
             textSize = 11f
             gravity = Gravity.CENTER
             minHeight = dp(40)
             minWidth = dp(60)
             setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = mediaControlBackground()
+            background = notificationQueueControlBackground()
             setOnClickListener { dismissMediaNotification() }
         }
         mediaNotificationCard.addView(mediaNotificationContent)
@@ -1146,26 +1150,23 @@ class CapsuleService : NotificationListenerService() {
         fun queueButton(text: String, description: String, action: () -> Unit) = TextView(uiCtx).apply {
             this.text = text
             contentDescription = description
-            setTextColor(pillStyle().primary)
+            setTextColor(notificationQueueStyle().primary)
             textSize = 17f
             gravity = Gravity.CENTER
             minWidth = dp(44)
             minHeight = dp(44)
-            background = GradientDrawable().apply {
-                setColor(pillStyle().control)
-                cornerRadius = dp(16).toFloat()
-            }
+            background = notificationQueueControlBackground()
             setOnClickListener { action() }
         }
         notificationPrevious = queueButton("‹", "Previous notification") { browseQueuedNotification(-1) }
         notificationPosition = TextView(uiCtx).apply {
-            setTextColor(pillStyle().secondary)
+            setTextColor(notificationQueueStyle().secondary)
             textSize = 12f
             gravity = Gravity.CENTER
             minHeight = dp(44)
         }
         notificationNext = queueButton("›", "Next notification") { browseQueuedNotification(1) }
-        miniChargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 8) },
+        miniChargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 9) },
             { chargePct }, { pillStyle().primary }).apply {
             val size = (prefs.getInt("chargeRingSize", 48).coerceIn(36, 64) * 0.72f).toInt().coerceIn(26, 46)
             layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).apply { marginStart = dp(8); marginEnd = dp(2) }
@@ -1215,7 +1216,7 @@ class CapsuleService : NotificationListenerService() {
                 setPadding(dp(5), 0, dp(5), 0)
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(pillAccent())
+                    setColor(notificationQueueStyle().accent)
                 }
                 elevation = dp(3).toFloat()
                 visibility = View.GONE
@@ -1288,6 +1289,42 @@ class CapsuleService : NotificationListenerService() {
     // Keep all overlay surfaces on the same theme palette. Only the corner radius differs
     // between the compact pill and the expanded control panel.
     private fun pillStyle() = PillStyles.palette(prefs.getString("theme", "capsule"))
+
+    private fun notificationQueueThemeId(): String =
+        (prefs.getString("notificationQueueTheme", "blend") ?: "blend")
+            .takeIf { it in setOf("blend", "oneui", "iphone", "pixel", "nothing", "capsule") } ?: "blend"
+
+    private fun notificationQueueStyle(): PillStylePalette =
+        if (notificationQueueThemeId() == "blend") pillStyle() else PillStyles.palette(notificationQueueThemeId())
+
+    /** Transparent mode lets the notification layer read as part of the main pill surface. */
+    private fun notificationQueueSurface(): GradientDrawable {
+        val style = notificationQueueStyle()
+        val blended = notificationQueueThemeId() == "blend"
+        return GradientDrawable().apply {
+            cornerRadius = dp(if (style.id == "nothing") 10 else style.cornerDp).toFloat()
+            if (blended) {
+                setColor(Color.TRANSPARENT)
+                val edge = (0x66 shl 24) or (style.accent and 0x00FFFFFF)
+                setStroke(dp(1), edge)
+            } else {
+                orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                colors = intArrayOf(style.top, style.bottom)
+                setStroke(dp(1), style.outline)
+            }
+        }
+    }
+
+    private fun notificationQueueControlBackground(): GradientDrawable {
+        val style = notificationQueueStyle()
+        val blended = notificationQueueThemeId() == "blend"
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(if (style.id == "nothing") 8 else style.cornerDp).toFloat()
+            setColor(if (blended) Color.TRANSPARENT else style.control)
+            setStroke(dp(1), if (blended) style.outline else style.accent)
+        }
+    }
 
     private fun pillAccent(): Int = if (pillStyle().id == "pixel") {
         runCatching { uiCtx.getColor(android.R.color.system_accent1_200) }.getOrDefault(pillStyle().accent)
@@ -1984,11 +2021,19 @@ class CapsuleService : NotificationListenerService() {
             mediaNotificationIcon.setImageDrawable(appIcon(item.pkg))
             mediaNotificationRenderedKey = item.key
         }
-        mediaNotificationTitle.setTextColor(pillStyle().primary)
-        mediaNotificationBody.setTextColor(pillStyle().secondary)
-        mediaNotificationPosition.setTextColor(pillStyle().secondary)
-        mediaNotificationDismiss.setTextColor(pillStyle().primary)
-        mediaNotificationCard.visibility = View.VISIBLE
+        val queueStyle = notificationQueueStyle()
+        mediaNotificationCard.background = notificationQueueSurface()
+        mediaNotificationTitle.setTextColor(queueStyle.primary)
+        mediaNotificationBody.setTextColor(queueStyle.secondary)
+        mediaNotificationPosition.setTextColor(queueStyle.secondary)
+        mediaNotificationDismiss.setTextColor(queueStyle.primary)
+        mediaNotificationDismiss.background = notificationQueueControlBackground()
+        // This renderer also runs when the badge count changes. Never let that refresh
+        // resurrect the expanded card while the pill is collapsed or privacy-masked.
+        val visible = shouldShowMediaWithNotification() &&
+            !(lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true)) &&
+            !qsActive() && !widgetActive()
+        mediaNotificationCard.visibility = vis(visible)
     }
 
     private fun browseMediaNotification(delta: Int) {
@@ -3118,6 +3163,11 @@ class CapsuleService : NotificationListenerService() {
             style = android.graphics.Paint.Style.FILL
             color = 0xFFFFFFFF.toInt()
         }
+        private val remainingTrack = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            color = 0xFFFFFFFF.toInt()
+        }
         private val body = android.graphics.RectF()
         private val inner = android.graphics.RectF()
         private val boltPath = android.graphics.Path()
@@ -3154,9 +3204,11 @@ class CapsuleService : NotificationListenerService() {
             outline.strokeWidth = stroke
             val inset = stroke * 1.8f
             inner.set(left + inset, top + inset, left + bw - inset, top + bh - inset)
-            val shape = selectedShape().coerceIn(0, 8)
-            if (shape == 8) {
-                drawIrregularRing(canvas, w, h, unit)
+            val shape = selectedShape().coerceIn(0, 9)
+            val style = selectedStyle().coerceIn(0, 2)
+            val wave = (0.5 + 0.5 * kotlin.math.sin(phase * Math.PI * 6.0)).toFloat()
+            if (shape == 8 || shape == 9) {
+                drawIrregularRing(canvas, w, h, unit, style, wave, shape == 9)
             } else if (shape == 0) {
                 canvas.drawRoundRect(body, unit * 0.13f, unit * 0.13f, outline)
                 val terminal = android.graphics.RectF(left + bw * 0.32f, top - unit * 0.10f, left + bw * 0.68f, top + unit * 0.015f)
@@ -3202,8 +3254,6 @@ class CapsuleService : NotificationListenerService() {
                 if (shape == 2 || shape == 3 || shape == 5) canvas.drawPath(p, outline)
                 else if (shape != 6 && shape != 7) canvas.drawPath(p, fill)
             }
-            val style = selectedStyle().coerceIn(0, 2)
-            val wave = (0.5 + 0.5 * kotlin.math.sin(phase * Math.PI * 6.0)).toFloat()
             if (shape == 6) {
                 val dotRadius = unit * 0.055f
                 val litCount = ((phase * 9f).toInt() % 9) + 1
@@ -3223,7 +3273,7 @@ class CapsuleService : NotificationListenerService() {
                 canvas.drawArc(w/2f-radius, h/2f-radius, w/2f+radius, h/2f+radius,
                     -90f, 360f * phase, false, fill)
                 fill.style = android.graphics.Paint.Style.FILL
-            } else if (shape != 8) {
+            } else if (shape != 8 && shape != 9) {
                 canvas.save()
                 canvas.clipRect(inner)
                 when (style) {
@@ -3258,8 +3308,20 @@ class CapsuleService : NotificationListenerService() {
             }
             if (shape != 6) {
                 val u = unit * 0.22f
-                val boltScale = if (shape != 8 && style == 2) 0.78f + 0.32f * wave else 1f
-                if (shape == 8) bolt.color = ringTint()
+                val ringShape = shape == 8 || shape == 9
+                val boltScale = if (ringShape) when (style) {
+                    0 -> 0.98f + 0.04f * wave
+                    1 -> if ((phase * 9f).toInt() % 3 == 0) 1.035f else 1f
+                    else -> 0.94f + 0.08f * wave
+                } else 1f
+                if (ringShape) {
+                    bolt.color = ringTint()
+                    bolt.alpha = when (style) {
+                        0 -> (225 + 30 * wave).toInt().coerceIn(0, 255)
+                        1 -> if ((phase * 9f).toInt() % 3 == 0) 255 else 210
+                        else -> (205 + 50 * wave).toInt().coerceIn(0, 255)
+                    }
+                }
                 canvas.save()
                 canvas.translate(w / 2f, h / 2f)
                 canvas.scale(boltScale, boltScale)
@@ -3273,39 +3335,60 @@ class CapsuleService : NotificationListenerService() {
                 boltPath.close()
                 canvas.drawPath(boltPath, bolt)
                 canvas.restore()
+                if (ringShape) {
+                    bolt.color = 0xFFFFFFFF.toInt()
+                    bolt.alpha = 255
+                }
             }
         }
 
-        private fun drawIrregularRing(canvas: android.graphics.Canvas, w: Float, h: Float, unit: Float) {
+        private fun drawIrregularRing(canvas: android.graphics.Canvas, w: Float, h: Float, unit: Float, style: Int, wave: Float, crafted: Boolean) {
             val progress = percent().coerceIn(0, 100) / 100f
-            if (progress <= 0f) return
             val cx = w / 2f
             val cy = h / 2f
-            val radius = unit * 0.30f
+            val radius = unit * if (crafted) 0.305f else 0.30f
+            remainingTrack.color = ringTint()
+            remainingTrack.alpha = if (crafted) 62 else 48
+            remainingTrack.strokeWidth = maxOf(1.1f, unit * if (crafted) 0.026f else 0.030f)
+            val trackRadius = radius - remainingTrack.strokeWidth * 0.7f
+            canvas.drawCircle(cx, cy, trackRadius, remainingTrack)
+            if (progress <= 0f) return
+            // The dim track is the remaining charge arc; the brighter irregular stroke is progress.
+            // Keep the gap centered at the top so it reads as an intentional progress indicator.
+            val gapCenter = -90f
             val gapSweep = 360f * (1f - progress)
-            val gapCenter = 230f
-            val start = Math.toRadians((gapCenter + gapSweep / 2f).toDouble())
+            val startDegrees = gapCenter + gapSweep / 2f
+            val start = Math.toRadians(startDegrees.toDouble())
             val sweep = 360f * progress
-            val segments = maxOf(24, (160f * progress).toInt())
+            val segments = maxOf(32, (220f * progress).toInt())
             val movingPhase = phase * (Math.PI * 2.0)
             val path = android.graphics.Path()
+            var drawing = false
             for (i in 0..segments) {
                 val f = i.toFloat() / segments
+                if (style == 1 && (i % 10 == 8 || i % 10 == 9)) {
+                    drawing = false
+                    continue
+                }
                 val theta = start + Math.toRadians((sweep * f).toDouble())
                 val angle = theta.toFloat()
-                val wobble = 0.045f * kotlin.math.sin(angle * 7f + movingPhase).toFloat() +
-                    0.018f * kotlin.math.sin(angle * 13f - movingPhase * 0.72).toFloat()
+                val amplitude = if (style == 0) 0.025f else if (crafted) 0.012f else 0.018f
+                val wobble = amplitude * kotlin.math.sin(angle * 7f + movingPhase).toFloat() +
+                    amplitude * 0.38f * kotlin.math.sin(angle * 13f - movingPhase * 0.72).toFloat()
                 val r = radius * (1f + wobble)
                 val x = cx + kotlin.math.cos(theta).toFloat() * r
                 val y = cy + kotlin.math.sin(theta).toFloat() * r
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                if (!drawing) path.moveTo(x, y) else path.lineTo(x, y)
+                drawing = true
             }
-            if (progress >= 1f) path.close()
             outline.color = ringTint()
-            outline.strokeWidth = maxOf(1.5f, unit * 0.075f)
+            val baseStroke = maxOf(1.2f, unit * if (crafted) 0.038f else 0.042f)
+            outline.strokeWidth = if (style == 2) baseStroke * (0.94f + 0.10f * wave) else baseStroke
+            outline.alpha = if (style == 2) (185 + 70 * wave).toInt().coerceIn(0, 255) else 255
             outline.strokeCap = android.graphics.Paint.Cap.ROUND
             outline.strokeJoin = android.graphics.Paint.Join.ROUND
             canvas.drawPath(path, outline)
+            outline.alpha = 255
             outline.color = 0xFFEAF7F0.toInt()
         }
     }
@@ -3929,8 +4012,38 @@ class CapsuleService : NotificationListenerService() {
 
     private fun vis(on: Boolean) = if (on) View.VISIBLE else View.GONE
 
+    private fun publishNotificationQueueStatus(
+        winner: String,
+        mediaWithNotification: Boolean,
+        notifOn: Boolean,
+        lockPrivate: Boolean,
+        hidden: Boolean
+    ) {
+        val count = notificationQueue.size + notificationOverflow
+        val summary = when {
+            count == 0 -> "Queue empty. New notifications appear here."
+            lockPrivate -> "$count waiting · hidden by lock-screen privacy."
+            hidden -> "$count waiting · temporarily hidden while a widget or quick settings is active."
+            mediaWithNotification -> "$count waiting · browse notifications below media controls in the expanded pill."
+            notifOn -> "$count queued · notification details are open in the pill. Swipe or use the queue controls to browse."
+            !expanded -> "$count waiting · compact pill shows the count; expand the pill to browse."
+            winner == "navigation" -> "$count waiting · navigation has priority; notifications are available when navigation yields."
+            winner == "charging" -> "$count waiting · charging has priority; notifications are available when charging yields."
+            winner == "media" -> "$count waiting · media has priority; expand media to see notifications beneath its controls."
+            else -> "$count waiting · expand the pill to browse notifications."
+        }
+        if (prefs.getString("queueStateSummary", null) != summary) {
+            prefs.edit().putString("queueStateSummary", summary).apply()
+        }
+    }
+
     private fun applyVisibility() {
         if (pill == null) return
+        pill?.gravity = if (expanded && prefs.getBoolean("expandFromStatusBar", true)) {
+            Gravity.TOP or Gravity.START
+        } else {
+            Gravity.CENTER_VERTICAL
+        }
         refreshMediaControlStyle()
         val lockPrivate = lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true)
         val qsOn = qsActive()
@@ -3954,6 +4067,7 @@ class CapsuleService : NotificationListenerService() {
         // Notification details belong to an expanded surface. In compact mode, keep only the
         // count badge; rendering title/actions there competes with the charging/media indicators.
         val notifOn = !hideAll && expanded && showingNotif && winner in setOf("live", "notifications") && !mediaWithNotification
+        publishNotificationQueueStatus(winner, mediaWithNotification, notifOn, lockPrivate, hideAll)
         val musicOn = !hideAll && expanded && !callActive && playing &&
             (winner == "media" || mediaWithNotification)
         val miniMusic = !hideAll && !expanded && !callActive && winner == "media" && playing
@@ -4048,7 +4162,7 @@ class CapsuleService : NotificationListenerService() {
             miniRight.setTextColor(0xFF30D158.toInt())
         } else {
             miniRight.text = "$chargePct%"
-            miniRight.textSize = 13f * k
+            miniRight.textSize = prefs.getInt("chargePctTextSize", 13).coerceIn(10, 24).toFloat()
             miniRight.setTextColor(if (lastTempC >= 42.0) 0xFFFF9F0A.toInt() else Color.WHITE)
         }
         val arrowBmp = mapsArrow()

@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.content.ComponentName
 import android.content.ClipData
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -31,8 +32,17 @@ class MainActivity : Activity() {
     private lateinit var repairText: TextView
     private lateinit var saveMsg: TextView
     private lateinit var col: LinearLayout
+    private var queueStateView: TextView? = null
+    private var expansionPreviewSurface: View? = null
+    private var expansionPreviewLabel: TextView? = null
     private var cat: String? = null
     private val prefs by lazy { getSharedPreferences("capsule", MODE_PRIVATE) }
+    private val queueStateListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        when (key) {
+            "queueStateSummary" -> refreshQueueState()
+            "expandFromStatusBar" -> refreshExpansionAnchorPreview()
+        }
+    }
     private val accent by lazy { getColor(android.R.color.system_accent1_200) }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -549,6 +559,80 @@ class MainActivity : Activity() {
         slider(size, "Expanded width", "expW", 150, 360, 340)
         slider(size, "Vertical position$where", if (land) "topYL" else "topY", 0, 40, 6)
         slider(size, "Horizontal shift$where", if (land) "offXL" else "offX", -100, 100, 0)
+        toggle(size, "Keep expanded pill aligned with the status-bar capsule", "expandFromStatusBar", true)
+        size.addView(expansionAnchorPreview())
+        expansionPreviewLabel = TextView(this).apply {
+            textSize = 11f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), 0, dp(2), dp(6))
+        }.also { size.addView(it) }
+        refreshExpansionAnchorPreview()
+    }
+
+    private fun expansionAnchorPreview(): View {
+        val style = PillStyles.palette(prefs.getString("theme", "capsule"))
+        val preview = android.widget.FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(156))
+                .apply { topMargin = dp(4); bottomMargin = dp(8) }
+            background = GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(0xFF111116.toInt())
+                setStroke(dp(1), 0x33444455)
+            }
+            clipToPadding = true
+            clipChildren = true
+        }
+        val status = TextView(this).apply {
+            text = "9:41     ◇   5G   ▰"
+            textSize = 10f
+            setTextColor(0xFFB8B8C2.toInt())
+            setPadding(dp(10), dp(5), dp(10), 0)
+        }
+        preview.addView(status, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT, dp(22), android.view.Gravity.TOP
+        ))
+        val expandedSurface = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.TOP
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(style.cornerDp.coerceAtLeast(18)).toFloat()
+                orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                colors = intArrayOf(style.top, style.bottom)
+                setStroke(dp(1), style.outline)
+            }
+        }
+        expandedSurface.addView(TextView(this).apply {
+            text = "◉     Now playing · Notifications"
+            textSize = 11f
+            setTextColor(style.primary)
+        })
+        expandedSurface.addView(TextView(this).apply {
+            text = "Expanded content grows downward from this line"
+            textSize = 9f
+            setTextColor(style.secondary)
+            setPadding(0, dp(3), 0, 0)
+        })
+        preview.addView(expandedSurface, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT, dp(68), android.view.Gravity.TOP
+        ).apply { leftMargin = dp(8); rightMargin = dp(8) })
+        expansionPreviewSurface = expandedSurface
+        return preview
+    }
+
+    private fun refreshExpansionAnchorPreview() {
+        val fixedTop = prefs.getBoolean("expandFromStatusBar", true)
+        expansionPreviewSurface?.let { surface ->
+            (surface.layoutParams as? android.widget.FrameLayout.LayoutParams)?.let { params ->
+                params.topMargin = dp(if (fixedTop) 22 else 44)
+                surface.layoutParams = params
+            }
+        }
+        expansionPreviewLabel?.text = if (fixedTop) {
+            "Preview: the capsule keeps its top edge and opens downward."
+        } else {
+            "Preview: expanded content stays vertically centered."
+        }
     }
 
     private fun buildMusic() {
@@ -565,6 +649,66 @@ class MainActivity : Activity() {
         toggle(auto, "Expand the pill when a notification arrives", "notifAutoExpand", true)
         toggle(auto, "Collapse it automatically after a time", "notifAutoCollapse", true)
         slider(auto, "Seconds before it collapses", "notifSeconds", 2, 15, 4)
+
+        val queueLook = card("Notification queue appearance")
+        val preview = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(24).toFloat()
+                val pill = PillStyles.palette(prefs.getString("theme", "capsule"))
+                orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                colors = intArrayOf(pill.top, pill.bottom)
+                setStroke(dp(1), pill.outline)
+            }
+        }
+        val previewHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        previewHeader.addView(TextView(this).apply {
+            text = "2 waiting · notification preview"
+            textSize = 12f
+            setTextColor(primaryTextColor())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        val previewBadge = TextView(this).apply {
+            text = "2"
+            gravity = android.view.Gravity.CENTER
+            minWidth = dp(24)
+            minHeight = dp(24)
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL }
+        }
+        previewHeader.addView(previewBadge)
+        preview.addView(previewHeader)
+        val previewCard = TextView(this).apply {
+            text = "Delivery update\nYour order is nearby · Dismiss"
+            textSize = 12f
+            setPadding(dp(10), dp(9), dp(10), dp(9))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = dp(8) }
+        }
+        preview.addView(previewCard)
+        queueLook.addView(preview)
+        notificationQueueThemeButton(queueLook, previewCard, previewBadge)
+        queueLook.addView(TextView(this).apply {
+            text = "Style the notification count and expanded queue card independently. Transparent blend removes the card fill so it reads as part of the pill."
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(4), dp(2), dp(2))
+        })
+        queueStateView = TextView(this).apply {
+            textSize = 12f
+            setTextColor(secondaryTextColor())
+            setPadding(dp(2), dp(8), dp(2), dp(2))
+        }.also { queueLook.addView(it) }
+        button(queueLook, "Refresh queue status") { refreshQueueState() }
+        updateNotificationQueuePreview(
+            prefs.getString("notificationQueueTheme", "blend") ?: "blend",
+            previewCard,
+            previewBadge
+        )
 
         val shown = card("Which notifications show")
         toggle(shown, "Other notifications", "showNotifs", true)
@@ -597,6 +741,66 @@ class MainActivity : Activity() {
         val heights = card("Heights")
         slider(heights, "Height: notifications and calls", "expH_notif", 40, 120, 64)
         slider(heights, "Height: notification with buttons", "expH_stack", 40, 160, 104)
+    }
+
+    private fun notificationQueueThemeButton(parent: LinearLayout, preview: TextView, badge: TextView) {
+        val modes = listOf("blend", "oneui", "iphone", "pixel", "nothing", "capsule")
+        val names = mapOf(
+            "blend" to "Transparent blend with pill",
+            "oneui" to "One UI inspired",
+            "iphone" to "iPhone inspired",
+            "pixel" to "Pixel inspired",
+            "nothing" to "Nothing inspired",
+            "capsule" to "Capsule original"
+        )
+        fun selected() = (prefs.getString("notificationQueueTheme", "blend") ?: "blend")
+            .takeIf { it in modes } ?: "blend"
+        fun label(mode: String) = "Queue theme: ${names[mode] ?: names["blend"]}"
+        val button = styledButton().apply {
+            text = label(selected())
+            contentDescription = "Choose notification queue appearance"
+        }
+        button.setOnClickListener {
+            val current = selected()
+            AlertDialog.Builder(this)
+                .setTitle("Notification queue appearance")
+                .setSingleChoiceItems(modes.map { names[it] ?: it }.toTypedArray(), modes.indexOf(current)) { dialog, which ->
+                    val mode = modes[which]
+                    prefs.edit().putString("notificationQueueTheme", mode).apply()
+                    button.text = label(mode)
+                    updateNotificationQueuePreview(mode, preview, badge)
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        parent.addView(button)
+    }
+
+    private fun updateNotificationQueuePreview(mode: String, preview: TextView, badge: TextView) {
+        val blended = mode == "blend"
+        val style = if (blended) PillStyles.palette(prefs.getString("theme", "capsule")) else PillStyles.palette(mode)
+        preview.setTextColor(style.primary)
+        preview.background = GradientDrawable().apply {
+            cornerRadius = dp(if (style.id == "nothing") 10 else style.cornerDp).toFloat()
+            if (blended) {
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(1), (0x66 shl 24) or (style.accent and 0x00FFFFFF))
+            } else {
+                orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                colors = intArrayOf(style.top, style.bottom)
+                setStroke(dp(1), style.outline)
+            }
+        }
+        badge.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(style.accent)
+        }
+    }
+
+    private fun refreshQueueState() {
+        queueStateView?.text = "Live queue state\n" +
+            (prefs.getString("queueStateSummary", null) ?: "Waiting for Capsule to report the current queue state.")
     }
 
     private fun activityPriorityButton(parent: LinearLayout) {
@@ -738,8 +942,9 @@ class MainActivity : Activity() {
         slider(charge, "Alert at charge (%)", "chargeAlertAt", 50, 100, 80)
         slider(charge, "Height: charging", "expH_charge", 40, 120, 64)
         slider(charge, "Charging ring size (dp)", "chargeRingSize", 36, 64, 48)
+        slider(charge, "Collapsed charging percentage size (sp)", "chargePctTextSize", 10, 24, 13)
         charge.addView(TextView(this).apply {
-            text = "Changes the irregular charging ring in both pill sizes; the compact ring scales down to keep the battery percentage readable."
+            text = "The crafted live ring shows both charge gained and charge remaining. Liquid, segmented, and pulse modes also tune the ring and its centered bolt together."
             textSize = 12f
             setTextColor(secondaryTextColor())
             setPadding(dp(2), dp(1), dp(2), dp(5))
@@ -806,8 +1011,8 @@ class MainActivity : Activity() {
     }
 
     private fun chargingIconButton(parent: LinearLayout) {
-        val icons = listOf("One UI battery", "Lightning bolt", "Power plug", "Leaf", "Spark", "Pixel battery", "Nothing glyph dots", "Pixel charge ring", "Irregular progress ring")
-        fun selected() = prefs.getInt("chargeIconShape", 8).coerceIn(0, icons.lastIndex)
+        val icons = listOf("One UI battery", "Lightning bolt", "Power plug", "Leaf", "Spark", "Pixel battery", "Nothing glyph dots", "Pixel charge ring", "Irregular progress ring", "Crafted live charge ring")
+        fun selected() = prefs.getInt("chargeIconShape", 9).coerceIn(0, icons.lastIndex)
         val b = styledButton().apply {
             text = "Charging icon: " + icons[selected()]
             contentDescription = "Choose charging icon design"
@@ -1437,6 +1642,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        prefs.registerOnSharedPreferenceChangeListener(queueStateListener)
+        refreshQueueState()
         val overlay = Settings.canDrawOverlays(this)
         val listener = Settings.Secure
             .getString(contentResolver, "enabled_notification_listeners")
@@ -1465,5 +1672,10 @@ class MainActivity : Activity() {
         if (overlay && listener) {
             NotificationListenerService.requestRebind(ComponentName(this, CapsuleService::class.java))
         }
+    }
+
+    override fun onPause() {
+        prefs.unregisterOnSharedPreferenceChangeListener(queueStateListener)
+        super.onPause()
     }
 }
