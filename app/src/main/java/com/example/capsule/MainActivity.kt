@@ -943,8 +943,10 @@ class MainActivity : Activity() {
         slider(charge, "Height: charging", "expH_charge", 40, 120, 64)
         slider(charge, "Charging ring size (dp)", "chargeRingSize", 36, 64, 48)
         slider(charge, "Collapsed charging percentage size (sp)", "chargePctTextSize", 10, 24, 13)
+        slider(charge, "Irregular ring wave density", "chargeRingDensity", 3, 16, 7)
+        slider(charge, "Irregular ring animation speed", "chargeRingSpeed", 1, 10, 5)
         charge.addView(TextView(this).apply {
-            text = "The crafted live ring shows both charge gained and charge remaining. Liquid, segmented, and pulse modes also tune the ring and its centered bolt together."
+            text = "Tune how many waves form around the irregular ring and how quickly they move. Lower density makes broader waves; higher density makes finer ripples. The remaining-charge track stays visible, and the centered bolt follows the selected animation."
             textSize = 12f
             setTextColor(secondaryTextColor())
             setPadding(dp(2), dp(1), dp(2), dp(5))

@@ -870,7 +870,7 @@ class CapsuleService : NotificationListenerService() {
             ).apply { marginEnd = dp(12) }
         }
         chargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 9) },
-            { chargePct }, { pillStyle().primary }).apply {
+            { chargePct }, { pillStyle().primary }, { prefs.getInt("chargeRingDensity", 7) }, { prefs.getInt("chargeRingSpeed", 5) }).apply {
             val size = prefs.getInt("chargeRingSize", 48).coerceIn(36, 64)
             layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).apply { marginStart = dp(12) }
         }
@@ -1167,7 +1167,7 @@ class CapsuleService : NotificationListenerService() {
         }
         notificationNext = queueButton("›", "Next notification") { browseQueuedNotification(1) }
         miniChargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 9) },
-            { chargePct }, { pillStyle().primary }).apply {
+            { chargePct }, { pillStyle().primary }, { prefs.getInt("chargeRingDensity", 7) }, { prefs.getInt("chargeRingSpeed", 5) }).apply {
             val size = (prefs.getInt("chargeRingSize", 48).coerceIn(36, 64) * 0.72f).toInt().coerceIn(26, 46)
             layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).apply { marginStart = dp(8); marginEnd = dp(2) }
             visibility = View.GONE
@@ -3147,7 +3147,9 @@ class CapsuleService : NotificationListenerService() {
         private val selectedStyle: () -> Int,
         private val selectedShape: () -> Int = { 0 },
         private val percent: () -> Int = { 50 },
-        private val ringTint: () -> Int = { 0xFFFFFFFF.toInt() }
+        private val ringTint: () -> Int = { 0xFFFFFFFF.toInt() },
+        private val ringDensity: () -> Int = { 7 },
+        private val ringSpeed: () -> Int = { 5 }
     ) : View(ctx) {
         private val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
@@ -3173,7 +3175,6 @@ class CapsuleService : NotificationListenerService() {
         private val boltPath = android.graphics.Path()
         private var phase = 0f
         private val anim = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 1800
             repeatCount = android.animation.ValueAnimator.INFINITE
             interpolator = android.view.animation.LinearInterpolator()
             addUpdateListener {
@@ -3183,7 +3184,10 @@ class CapsuleService : NotificationListenerService() {
         }
         private fun updateRunning() {
             if (isAttachedToWindow && isShown && windowVisibility == View.VISIBLE) {
-                if (!anim.isStarted) anim.start()
+                if (!anim.isStarted) {
+                    anim.duration = (3000L - (ringSpeed().coerceIn(1, 10) - 1) * 250L).coerceIn(750L, 3000L)
+                    anim.start()
+                }
             } else anim.cancel()
         }
         override fun onAttachedToWindow() { super.onAttachedToWindow(); updateRunning() }
@@ -3347,6 +3351,7 @@ class CapsuleService : NotificationListenerService() {
             val cx = w / 2f
             val cy = h / 2f
             val radius = unit * if (crafted) 0.305f else 0.30f
+            val density = ringDensity().coerceIn(3, 16)
             remainingTrack.color = ringTint()
             remainingTrack.alpha = if (crafted) 62 else 48
             remainingTrack.strokeWidth = maxOf(1.1f, unit * if (crafted) 0.026f else 0.030f)
@@ -3373,8 +3378,8 @@ class CapsuleService : NotificationListenerService() {
                 val theta = start + Math.toRadians((sweep * f).toDouble())
                 val angle = theta.toFloat()
                 val amplitude = if (style == 0) 0.025f else if (crafted) 0.012f else 0.018f
-                val wobble = amplitude * kotlin.math.sin(angle * 7f + movingPhase).toFloat() +
-                    amplitude * 0.38f * kotlin.math.sin(angle * 13f - movingPhase * 0.72).toFloat()
+                val wobble = amplitude * kotlin.math.sin(angle * density + movingPhase).toFloat() +
+                    amplitude * 0.38f * kotlin.math.sin(angle * density * 1.85f - movingPhase * 0.72).toFloat()
                 val r = radius * (1f + wobble)
                 val x = cx + kotlin.math.cos(theta).toFloat() * r
                 val y = cy + kotlin.math.sin(theta).toFloat() * r
@@ -4013,7 +4018,7 @@ class CapsuleService : NotificationListenerService() {
     private fun vis(on: Boolean) = if (on) View.VISIBLE else View.GONE
 
     private fun publishNotificationQueueStatus(
-        winner: String,
+        winner: String?,
         mediaWithNotification: Boolean,
         notifOn: Boolean,
         lockPrivate: Boolean,
