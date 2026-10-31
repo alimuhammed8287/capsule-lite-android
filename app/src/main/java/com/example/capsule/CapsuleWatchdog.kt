@@ -17,7 +17,7 @@ class CapsuleWatchdog : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        KeepAlive.accessibilityConnected = true
+        KeepAlive.markAccessibilityConnected(this)
         DiagLog.installCrashHandler(this)
         DiagLog.add(this, "accessibility keep-alive connected")
         NotificationListenerService.requestRebind(ComponentName(this, CapsuleService::class.java))

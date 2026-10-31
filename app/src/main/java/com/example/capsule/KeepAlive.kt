@@ -19,9 +19,25 @@ object KeepAlive {
     const val ACTION = "com.example.capsulelite.KEEPALIVE"
     private const val ALARM_REQUEST = 4711
     private const val REPAIR_PERMISSION = "android.permission.WRITE_SECURE_SETTINGS"
+    private const val ACCESSIBILITY_REPAIR_PENDING = "accessibilityRepairPending"
+    private const val LISTENER_REPAIR_PENDING = "listenerRepairPending"
+    private const val RECENT_BIND_GRACE_MS = 60_000L
+    private const val REPAIR_RETRY_COOLDOWN_MS = 5 * 60_000L
 
     @Volatile var listenerConnected = false
     @Volatile var accessibilityConnected = false
+
+    fun markListenerConnected(ctx: Context) {
+        listenerConnected = true
+        ctx.getSharedPreferences("capsule", Context.MODE_PRIVATE).edit()
+            .putLong("lastListenerConnectedAt", SystemClock.elapsedRealtime()).apply()
+    }
+
+    fun markAccessibilityConnected(ctx: Context) {
+        accessibilityConnected = true
+        ctx.getSharedPreferences("capsule", Context.MODE_PRIVATE).edit()
+            .putLong("lastAccessibilityConnectedAt", SystemClock.elapsedRealtime()).apply()
+    }
 
     private fun enabled(ctx: Context, key: String): List<ComponentName> =
         (Settings.Secure.getString(ctx.contentResolver, key) ?: "")
@@ -42,44 +58,143 @@ object KeepAlive {
         ctx.getSharedPreferences("capsule", Context.MODE_PRIVATE)
             .getBoolean("autoRepairServices", false)
 
+    private fun secureList(ctx: Context, key: String): MutableList<String> =
+        (Settings.Secure.getString(ctx.contentResolver, key) ?: "")
+            .split(':').map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+
+    fun repairPending(ctx: Context): Boolean {
+        val prefs = ctx.getSharedPreferences("capsule", Context.MODE_PRIVATE)
+        return prefs.getBoolean(ACCESSIBILITY_REPAIR_PENDING, false) ||
+            prefs.getBoolean(LISTENER_REPAIR_PENDING, false)
+    }
+
+    private fun recentlyConnected(ctx: Context, key: String): Boolean {
+        val last = ctx.getSharedPreferences("capsule", Context.MODE_PRIVATE).getLong(key, 0L)
+        val age = SystemClock.elapsedRealtime() - last
+        return last > 0L && age in 0..RECENT_BIND_GRACE_MS
+    }
+
+    private fun repairCooldownActive(ctx: Context, key: String): Boolean {
+        val last = ctx.getSharedPreferences("capsule", Context.MODE_PRIVATE).getLong(key, 0L)
+        val age = SystemClock.elapsedRealtime() - last
+        return last > 0L && age in 0..REPAIR_RETRY_COOLDOWN_MS
+    }
+
     fun adbCommand(ctx: Context): String = "adb shell pm grant ${ctx.packageName} $REPAIR_PERMISSION"
 
     // Service repair is deliberately opt-in: an ADB grant alone must not override a user's later choice.
     fun ensureAccessibility(ctx: Context): String {
-        if (isAccessibilityEnabled(ctx)) return "on"
-        if (!autoRepairRequested(ctx)) return "OFF (automatic repair disabled in settings)"
-        if (!canSelfRepair(ctx)) return "OFF (self-repair permission not given)"
+        val prefs = ctx.getSharedPreferences("capsule", Context.MODE_PRIVATE)
+        val flat = ComponentName(ctx, CapsuleWatchdog::class.java).flattenToString()
+        val pending = prefs.getBoolean(ACCESSIBILITY_REPAIR_PENDING, false)
+        val enabled = isAccessibilityEnabled(ctx)
+        if (enabled && accessibilityConnected && !pending) return "on"
+        if (enabled && !accessibilityConnected && !pending && recentlyConnected(ctx, "lastAccessibilityConnectedAt")) {
+            return "enabled but disconnected; waiting for Android to bind"
+        }
+        if (enabled && !accessibilityConnected && !pending && repairCooldownActive(ctx, "lastAccessibilityRepairAt")) {
+            return "enabled but disconnected; reconnect pending"
+        }
+        if (!pending && !autoRepairRequested(ctx)) return if (enabled) "enabled, disconnected (automatic repair is off)" else
+            "OFF (automatic repair disabled in settings)"
+        if (!canSelfRepair(ctx)) {
+            if (pending) prefs.edit().remove(ACCESSIBILITY_REPAIR_PENDING).commit()
+            return if (enabled) "enabled, disconnected (self-repair permission missing)" else
+                "OFF (self-repair permission not given)"
+        }
         return runCatching {
-            val cur = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: ""
-            val flat = ComponentName(ctx, CapsuleWatchdog::class.java).flattenToString()
-            val next = if (cur.isBlank()) flat else "$cur:$flat"
-            val saved = Settings.Secure.putString(
-                ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, next
-            )
-            if (!saved) return@runCatching "OFF (Android refused accessibility repair)"
-            val enabledSaved = Settings.Secure.putInt(ctx.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
-            if (!enabledSaved || !isAccessibilityEnabled(ctx)) {
-                "OFF (repair attempted; Android has not confirmed the service is enabled)"
+            val services = secureList(ctx, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+            if (pending) {
+                if (flat !in services) services.add(flat)
+                val saved = Settings.Secure.putString(
+                    ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, services.joinToString(":")
+                )
+                val globallyEnabled = Settings.Secure.putInt(ctx.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+                prefs.edit().remove(ACCESSIBILITY_REPAIR_PENDING)
+                    .putLong("lastAccessibilityRepairAt", SystemClock.elapsedRealtime()).commit()
+                if (saved && globallyEnabled && isAccessibilityEnabled(ctx)) {
+                    "disconnected; accessibility service restarted, reconnect pending"
+                } else "OFF (Android did not confirm accessibility recovery)"
+            } else if (enabled && !accessibilityConnected) {
+                // HyperOS can leave a service listed as enabled after its binding has died.
+                // Cycle only Capsule's entry; preserve every other enabled accessibility service.
+                val remaining = services.filterNot { it == flat }
+                val saved = Settings.Secure.putString(
+                    ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, remaining.joinToString(":")
+                )
+                if (!saved) return@runCatching "enabled but disconnected (Android refused the restart)"
+                if (remaining.isEmpty()) {
+                    Settings.Secure.putInt(ctx.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0)
+                } else {
+                    Settings.Secure.putInt(ctx.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+                }
+                prefs.edit().putBoolean(ACCESSIBILITY_REPAIR_PENDING, true).commit()
+                "enabled but disconnected; restart staged"
             } else {
-                "was OFF, switched back on"
+                if (flat !in services) services.add(flat)
+                val saved = Settings.Secure.putString(
+                    ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, services.joinToString(":")
+                )
+                val globallyEnabled = Settings.Secure.putInt(ctx.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+                if (saved && globallyEnabled && isAccessibilityEnabled(ctx)) "was OFF, switched back on"
+                else "OFF (repair attempted; Android has not confirmed the service is enabled)"
             }
         }.getOrElse { "OFF, repair failed: ${it.javaClass.simpleName}: ${it.message}" }
     }
 
     // Same for the notification listener; only repair when the user explicitly enabled the option.
     fun ensureListener(ctx: Context): String {
-        if (isListenerEnabled(ctx)) return "on"
-        if (!autoRepairRequested(ctx)) return "OFF (automatic repair disabled in settings)"
-        if (!canSelfRepair(ctx)) return "OFF (self-repair permission not given)"
+        val prefs = ctx.getSharedPreferences("capsule", Context.MODE_PRIVATE)
+        val flat = ComponentName(ctx, CapsuleService::class.java).flattenToString()
+        val pending = prefs.getBoolean(LISTENER_REPAIR_PENDING, false)
+        val enabled = isListenerEnabled(ctx)
+        if (enabled && listenerConnected && !pending) return "on"
+        if (enabled && !listenerConnected && !pending && recentlyConnected(ctx, "lastListenerConnectedAt")) {
+            NotificationListenerService.requestRebind(ComponentName(ctx, CapsuleService::class.java))
+            return "enabled but disconnected; rebind requested"
+        }
+        if (enabled && !listenerConnected && !pending && repairCooldownActive(ctx, "lastListenerRepairAt")) {
+            NotificationListenerService.requestRebind(ComponentName(ctx, CapsuleService::class.java))
+            return "enabled but disconnected; reconnect pending"
+        }
+        if (!pending && !autoRepairRequested(ctx)) return if (enabled) "enabled, disconnected (automatic repair is off)" else
+            "OFF (automatic repair disabled in settings)"
+        if (!canSelfRepair(ctx)) {
+            if (pending) prefs.edit().remove(LISTENER_REPAIR_PENDING).commit()
+            return if (enabled) "enabled, disconnected (self-repair permission missing)" else
+                "OFF (self-repair permission not given)"
+        }
         return runCatching {
-            val cur = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners") ?: ""
-            val flat = ComponentName(ctx, CapsuleService::class.java).flattenToString()
-            val next = if (cur.isBlank()) flat else "$cur:$flat"
-            val saved = Settings.Secure.putString(ctx.contentResolver, "enabled_notification_listeners", next)
-            if (!saved || !isListenerEnabled(ctx)) {
-                "OFF (repair attempted; Android has not confirmed the listener is enabled)"
+            val services = secureList(ctx, "enabled_notification_listeners")
+            if (pending) {
+                if (flat !in services) services.add(flat)
+                val saved = Settings.Secure.putString(
+                    ctx.contentResolver, "enabled_notification_listeners", services.joinToString(":")
+                )
+                prefs.edit().remove(LISTENER_REPAIR_PENDING)
+                    .putLong("lastListenerRepairAt", SystemClock.elapsedRealtime()).commit()
+                if (saved && isListenerEnabled(ctx)) {
+                    NotificationListenerService.requestRebind(ComponentName(ctx, CapsuleService::class.java))
+                    "disconnected; notification listener restarted, reconnect pending"
+                } else "OFF (Android did not confirm notification-listener recovery)"
+            } else if (enabled && !listenerConnected) {
+                val remaining = services.filterNot { it == flat }
+                val saved = Settings.Secure.putString(
+                    ctx.contentResolver, "enabled_notification_listeners", remaining.joinToString(":")
+                )
+                if (!saved) return@runCatching "enabled but disconnected (Android refused the restart)"
+                prefs.edit().putBoolean(LISTENER_REPAIR_PENDING, true).commit()
+                "enabled but disconnected; restart staged"
             } else {
-                "was OFF, switched back on"
+                if (flat !in services) services.add(flat)
+                val saved = Settings.Secure.putString(
+                    ctx.contentResolver, "enabled_notification_listeners", services.joinToString(":")
+                )
+                if (!saved || !isListenerEnabled(ctx)) "OFF (repair attempted; Android has not confirmed the listener is enabled)"
+                else {
+                    NotificationListenerService.requestRebind(ComponentName(ctx, CapsuleService::class.java))
+                    "was OFF, switched back on"
+                }
             }
         }.getOrElse { "OFF, repair failed: ${it.javaClass.simpleName}: ${it.message}" }
     }
@@ -120,10 +235,12 @@ object KeepAlive {
 // asks Android to reconnect the notification listener, and repairs accessibility if allowed.
 class KeepAliveReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        var acc = ""
+        var lis = ""
         runCatching {
             DiagLog.installCrashHandler(context)
-            val acc = KeepAlive.ensureAccessibility(context)
-            val lis = KeepAlive.ensureListener(context)
+            acc = KeepAlive.ensureAccessibility(context)
+            lis = KeepAlive.ensureListener(context)
             DiagLog.add(
                 context,
                 "keep-alive check: listener=$lis (connected=${KeepAlive.listenerConnected}), accessibility=$acc " +
@@ -133,6 +250,12 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 NotificationListenerService.requestRebind(ComponentName(context, CapsuleService::class.java))
             }
         }
-        KeepAlive.schedule(context)
+        val retryDelay = when {
+            KeepAlive.repairPending(context) -> 2_000L
+            acc.contains("waiting for Android") || lis.contains("rebind requested") -> 30_000L
+            acc.contains("reconnect pending") || lis.contains("reconnect pending") -> 30_000L
+            else -> 15 * 60 * 1000L
+        }
+        KeepAlive.schedule(context, retryDelay)
     }
 }

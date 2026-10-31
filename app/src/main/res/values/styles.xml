@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep Material's required theme scoped to the collapsing settings header. -->
+    <style name="CapsuleMaterialComponentsTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#6CE5B2</item>
+        <item name="colorPrimaryVariant">#138A78</item>
+        <item name="colorSecondary">#6CE5B2</item>
+        <item name="colorSurface">#121820</item>
+        <item name="colorOnSurface">#E7EDF5</item>
+        <item name="android:colorAccent">#6CE5B2</item>
+    </style>
+</resources>

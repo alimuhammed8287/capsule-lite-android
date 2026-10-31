@@ -3,6 +3,41 @@ package com.example.capsule
 object CapsulePrefs {
     const val MAPS_PKG = "com.google.android.apps.maps"
 
+    const val notificationBadgeSizeDefault = 20
+    val notificationBadgeColorOptions = listOf(
+        "theme" to "Match queue / pill theme",
+        "blue" to "Blue",
+        "violet" to "Violet",
+        "green" to "Green",
+        "amber" to "Amber",
+        "red" to "Red",
+        "gray" to "Graphite"
+    )
+
+    fun notificationBadgeSize(raw: Int): Int = raw.coerceIn(16, 36)
+
+    fun notificationBadgeColor(raw: String?, themeAccent: Int): Int = when (raw) {
+        "blue" -> 0xFF2055B5.toInt()
+        "violet" -> 0xFF6338B8.toInt()
+        "green" -> 0xFF126B4A.toInt()
+        "amber" -> 0xFF854800.toInt()
+        "red" -> 0xFFB3261E.toInt()
+        "gray" -> 0xFF525B66.toInt()
+        else -> themeAccent
+    }
+
+    /** Keep the small count legible on both light theme accents and saturated fixed colors. */
+    fun notificationBadgeTextColor(background: Int): Int {
+        fun linear(channel: Int): Double {
+            val s = channel / 255.0
+            return if (s <= 0.04045) s / 12.92 else Math.pow((s + 0.055) / 1.055, 2.4)
+        }
+        val luminance = 0.2126 * linear((background ushr 16) and 0xFF) +
+            0.7152 * linear((background ushr 8) and 0xFF) +
+            0.0722 * linear(background and 0xFF)
+        return if (luminance > 0.179) 0xFF17202B.toInt() else 0xFFFFFFFF.toInt()
+    }
+
     val gestureKeys = listOf("g_tap", "g_double", "g_long", "g_up", "g_down", "g_left", "g_right")
 
     val gestureLabels = mapOf(
@@ -19,7 +54,7 @@ object CapsulePrefs {
         "none", "expand", "play_pause", "next", "previous", "flashlight",
         "volume_up", "volume_down", "brightness_up", "brightness_down",
         "open_maps", "open_camera", "open_dialer",
-        "image_widget", "open_codes", "clock", "control_panel"
+        "image_widget", "open_codes", "clock", "open_pinned", "open_tasks"
     )
 
     val actionLabels = mapOf(
@@ -39,7 +74,8 @@ object CapsulePrefs {
         "image_widget" to "Show image widget",
         "open_codes" to "Open code generator",
         "clock" to "Show clock and date",
-        "control_panel" to "Control panel"
+        "open_pinned" to "Open pinned apps",
+        "open_tasks" to "Open Task Manager"
     )
 
     // Control panel tiles: direct toggles first, then shortcuts that open the phone's own panel

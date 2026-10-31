@@ -1,4 +1,4 @@
-name: Build Capsule Lite APK
+name: Build Dynamic Island Project APK
 
 on:
   push:
@@ -25,10 +25,24 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
 
       - name: Validate source and Android XML
         run: python3 scripts/validate_source.py
+
+      - name: Read app version
+        id: app-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_name="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          version_code="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' app/build.gradle.kts | head -n 1)"
+          test -n "$version_name"
+          test -n "$version_code"
+          {
+            echo "name=$version_name"
+            echo "code=$version_code"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Configure stable debug signing
         id: signing
@@ -57,10 +71,22 @@ jobs:
       - name: Compile debug APK
         run: gradle --no-daemon --stacktrace assembleDebug
 
+      - name: Name APK for sharing
+        id: apk-name
+        shell: bash
+        env:
+          APP_VERSION: ${{ steps.app-version.outputs.name }}
+          APP_VERSION_CODE: ${{ steps.app-version.outputs.code }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          apk_name="Dynamic Island Project-v${APP_VERSION}-build${APP_VERSION_CODE}-run${RUN_NUMBER}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "app/build/outputs/apk/debug/$apk_name"
+          echo "name=$apk_name" >> "$GITHUB_OUTPUT"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: capsule-lite-v50-debug-apk-${{ steps.signing.outputs.mode }}-run-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Dynamic-Island-Project-v${{ steps.app-version.outputs.name }}-build${{ steps.app-version.outputs.code }}-debug-${{ steps.signing.outputs.mode }}-run-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/${{ steps.apk-name.outputs.name }}
           if-no-files-found: error
           retention-days: 14

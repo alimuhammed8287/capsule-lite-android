@@ -60,6 +60,8 @@ import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.text.TextUtils
+import android.text.Layout
+import android.text.StaticLayout
 import android.view.Display
 import android.view.GestureDetector
 import android.view.Gravity
@@ -127,14 +129,17 @@ class CapsuleService : NotificationListenerService() {
     private var lastMapsDumpAt = 0L
     private lateinit var icon: ImageView
     private lateinit var textCol: LinearLayout
+    private lateinit var notificationBodyPanel: NotificationBodyPanel
     private lateinit var title: TextView
     private lateinit var subtitle: TextView
     private lateinit var btnPrev: ImageButton
     private lateinit var btnPlay: ImageButton
+    private lateinit var miniPlayButton: ImageButton
     private lateinit var btnNext: ImageButton
     private lateinit var btnBack10: ImageButton
     private lateinit var btnForward10: ImageButton
     private lateinit var progress: ProgressBar
+    private lateinit var mediaWaveProgress: SeekBar
     private lateinit var qsGrid: GridLayout
     private var qsButtons: Map<String, TextView> = emptyMap()
     private var imageOpen = false       // opened by the image widget gesture
@@ -163,9 +168,14 @@ class CapsuleService : NotificationListenerService() {
     private val barLevels = FloatArray(5)   // 0..1 level per visualizer bar, written by the mic thread
     private var lastInner = -1
     private var lastMapsWide = false
+    private var lastChargeMini = false
+    private var lastNotificationMini = false
     private lateinit var artRow: LinearLayout
+    private lateinit var miniMediaWaveform: MediaWaveformView
     private lateinit var miniVizSpacer: View
     private lateinit var replyRow: LinearLayout
+    private lateinit var notificationActionsRow: LinearLayout
+    private lateinit var notificationActionsScroll: android.widget.HorizontalScrollView
     private lateinit var ctrlRow: LinearLayout
     private lateinit var timeRow: LinearLayout
     private lateinit var elapsedText: TextView
@@ -181,21 +191,126 @@ class CapsuleService : NotificationListenerService() {
     private var bars: List<View> = emptyList()
     private lateinit var btnAnswer: ImageButton
     private lateinit var btnDecline: ImageButton
+    private lateinit var callAnswerGroup: LinearLayout
+    private lateinit var callDeclineGroup: LinearLayout
+    private lateinit var callAnswerLabel: TextView
+    private lateinit var callDeclineLabel: TextView
     private lateinit var callControlsRow: LinearLayout
     private lateinit var notificationBadge: TextView
+    private lateinit var notificationBadgeTarget: FrameLayout
+    private lateinit var activityBubble: LinearLayout
+    private lateinit var activityBubbleIcon: ImageView
+    private lateinit var activityBubbleChargeRing: ChargeRingView
+    private lateinit var activityBubbleLabel: TextView
+    private lateinit var notificationBubble: LinearLayout
+    private lateinit var notificationBubbleIcon: ImageView
+    private lateinit var notificationBubbleTitle: TextView
+    private lateinit var notificationBubbleBody: TextView
+    private var activityBubbleTouchDownX = 0f
+    private var activityBubbleTouchDownY = 0f
+    private var activityBubbleTouchDownKind: CapsuleActivityKind? = null
+    private var tapGestureOwnerCaptured = false
+    private var tapGestureOwnerId: String? = null
+    private var companionMotionExpansionOverride: Boolean? = null
+    private var activityBubbleMotionExpanding = false
+    private var notificationBubbleMotionExpanding = false
+    private var activityBubbleSwiping = false
+    private var activityBubbleSlotActive = false
+    private var activityBubbleLastSlotWidth = 0
+    private var notificationBubbleSlotActive = false
+    private var notificationBubbleTargetVisible = false
+    private var notificationBubbleHidePending = false
+    private var notificationBubbleLastSlotWidth = 0
+    private var notificationBubbleKey: String? = null
+    private var notificationBubbleDownX = 0f
+    private var notificationBubbleDownY = 0f
+    private var notificationBubbleSwiping = false
+    private var activityBubbleTargetVisible = false
+    private var activityBubbleHidePending = false
+    private var activityBubbleKey: String? = null
+    private var suppressedActivityBubbleKey: String? = null
+    private var focusedActivityId: String? = null
+    private var lastActivityBubbleVisible = false
     private lateinit var notificationPrevious: TextView
     private lateinit var notificationPosition: TextView
     private lateinit var notificationNext: TextView
     private lateinit var mediaNotificationCard: LinearLayout
+    private lateinit var notificationQueueStack: android.widget.ScrollView
+    private lateinit var notificationQueueStackRows: LinearLayout
+    private lateinit var taskPreviewPanel: LinearLayout
+    private lateinit var taskPreviewTitle: TextView
+    private lateinit var taskPreviewItems: LinearLayout
+    private var taskPreviewPage = 0
+    private var taskPreviewDownX = 0f
+
+    private fun renderTaskPreview() {
+        if (!::taskPreviewItems.isInitialized) return
+        val textScale = prefs.getInt("sectionTextScale_tasks", 100).coerceIn(80, 160) / 100f
+        val filter = prefs.getString("taskPreviewList", CapsuleTaskStore.ALL_LISTS) ?: CapsuleTaskStore.ALL_LISTS
+        val tasks = CapsuleTaskStore.filtered(prefs, filter)
+        val limit = prefs.getInt("taskPreviewLimit", 3).coerceIn(1, 8)
+        val pageCount = ((tasks.size + limit - 1) / limit).coerceAtLeast(1)
+        taskPreviewPage = taskPreviewPage.coerceIn(0, pageCount - 1)
+        val start = taskPreviewPage * limit
+        val visible = tasks.drop(start).take(limit)
+        taskPreviewTitle.text = if (tasks.isEmpty()) "No upcoming tasks" else
+            "${if (filter == CapsuleTaskStore.ALL_LISTS) "All tasks" else filter} · ${taskPreviewPage + 1}/$pageCount"
+        taskPreviewTitle.textSize = 13f * textScale
+        taskPreviewItems.removeAllViews()
+        visible.forEach { task ->
+            val line = LinearLayout(uiCtx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(3), dp(4), dp(3), dp(4))
+            }
+            line.addView(TextView(uiCtx).apply {
+                text = if (task.starred) "★" else "○"
+                textSize = 15f * textScale
+                setTextColor(if (task.starred) pillStyle().accent else pillStyle().secondary)
+                layoutParams = LinearLayout.LayoutParams(dp(25), LinearLayout.LayoutParams.WRAP_CONTENT)
+            })
+            line.addView(TextView(uiCtx).apply {
+                text = task.title + (task.dueAtMillis?.let { " · " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it)) } ?: "")
+                textSize = 12f * textScale
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                setTextColor(pillStyle().primary)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            taskPreviewItems.addView(line)
+        }
+        if (visible.isEmpty()) {
+            taskPreviewItems.addView(TextView(uiCtx).apply {
+                text = "Add a task from the full Task Manager."
+                textSize = 11f
+                setTextColor(pillStyle().secondary)
+                setPadding(dp(3), dp(5), dp(3), dp(5))
+            })
+        }
+        val divider = TextView(uiCtx).apply {
+            text = if (tasks.size > limit) "Swipe to browse · ${tasks.size} tasks" else "View only · changes are made in Task Manager"
+            textSize = 10f
+            setTextColor(pillStyle().secondary)
+            setPadding(dp(3), dp(4), dp(3), 0)
+        }
+        taskPreviewItems.addView(divider)
+    }
+    private lateinit var mediaNotificationHeader: LinearLayout
     private lateinit var mediaNotificationContent: LinearLayout
+    private lateinit var mediaNotificationActionsRow: LinearLayout
+    private lateinit var mediaNotificationActionButtons: List<TextView>
     private lateinit var mediaNotificationIcon: ImageView
     private lateinit var mediaNotificationTitle: TextView
     private lateinit var mediaNotificationBody: TextView
     private lateinit var mediaNotificationPosition: TextView
-    private lateinit var mediaNotificationDismiss: TextView
     private var mediaNotificationKey: String? = null
     private var mediaNotificationRenderedKey: String? = null
     private var mediaNotificationDownX = 0f
+    private var mediaNotificationDownY = 0f
+    private var mediaNotificationExpanded = false
+    private var notificationBodyDownX = 0f
+    private var notificationBodyDownY = 0f
+    private var notificationBodyHorizontalSwipe = false
     private var chips: List<TextView> = emptyList()
 
     private var miniW = 0
@@ -257,6 +372,13 @@ class CapsuleService : NotificationListenerService() {
     private var callQuietTicks = 0
     private var swipeDownX = 0f
     private var swipeDownY = 0f
+    private var expandSwipeDownX = 0f
+    private var expandSwipeDownY = 0f
+    private var expandGestureActivityId: String? = null
+    private var expandingBySwipe = false
+    private var expandSwipeCaptured = false
+    private var interceptingPillDownSwipe = false
+    private var expandSwipeDelegatedToChild = false
     private var swipeBaseX = 0
     private var swiping = false
     private var swipeTracker: android.view.VelocityTracker? = null
@@ -266,18 +388,126 @@ class CapsuleService : NotificationListenerService() {
     private var msm: MediaSessionManager? = null
     private var controller: MediaController? = null
     private val handler = Handler(Looper.getMainLooper())
+    private val pausedMediaCompactGraceMs = 2 * 60 * 1000L
+    private var lastMediaPlayingAtElapsed = 0L
+    private var mediaWasPlaying = false
+    private var mediaCompactGraceUntilElapsed = 0L
+    private val mediaCompactGraceExpiry = object : Runnable {
+        override fun run() {
+            val remaining = mediaCompactGraceUntilElapsed - SystemClock.elapsedRealtime()
+            if (remaining > 0L) {
+                handler.postDelayed(this, remaining)
+            } else {
+                mediaCompactGraceUntilElapsed = 0L
+                refreshMedia()
+            }
+        }
+    }
     private var lastMapsText = ""
     private var torchOn = false
+
+    private fun mediaPlaybackState() = controller?.playbackState?.state
+
+    private fun mediaIsPlaying() = mediaPlaybackState() == PlaybackState.STATE_PLAYING
+
+    private fun mediaSessionCanResume(): Boolean = controller != null && showMusic() && when (mediaPlaybackState()) {
+        PlaybackState.STATE_PAUSED, PlaybackState.STATE_STOPPED -> true
+        else -> false
+    }
+
+    private fun mediaPauseGraceActive(): Boolean {
+        val state = mediaPlaybackState()
+        val pauseOrBuffering = state == PlaybackState.STATE_PAUSED ||
+            state == PlaybackState.STATE_BUFFERING || state == PlaybackState.STATE_CONNECTING
+        return mediaCompactGraceUntilElapsed > SystemClock.elapsedRealtime() && pauseOrBuffering
+    }
+
+    private fun mediaCompactActivityActive(): Boolean =
+        showMusic() && controller != null && (mediaIsPlaying() || mediaPauseGraceActive())
+
+    /** Keep a resumable session in the collapsed pill briefly, then free the compact surface. */
+    private fun updateMediaPauseGrace(state: PlaybackState?) {
+        val now = SystemClock.elapsedRealtime()
+        when (state?.state) {
+            PlaybackState.STATE_PLAYING -> {
+                lastMediaPlayingAtElapsed = now
+                mediaWasPlaying = true
+                mediaCompactGraceUntilElapsed = 0L
+                handler.removeCallbacks(mediaCompactGraceExpiry)
+            }
+            PlaybackState.STATE_PAUSED -> {
+                if (mediaWasPlaying) lastMediaPlayingAtElapsed = now
+                mediaWasPlaying = false
+                val until = lastMediaPlayingAtElapsed + pausedMediaCompactGraceMs
+                if (lastMediaPlayingAtElapsed > 0L && now < until) {
+                    mediaCompactGraceUntilElapsed = until
+                    handler.removeCallbacks(mediaCompactGraceExpiry)
+                    handler.postDelayed(mediaCompactGraceExpiry, until - now)
+                } else {
+                    mediaCompactGraceUntilElapsed = 0L
+                    handler.removeCallbacks(mediaCompactGraceExpiry)
+                }
+            }
+            PlaybackState.STATE_STOPPED, PlaybackState.STATE_NONE, PlaybackState.STATE_ERROR -> {
+                lastMediaPlayingAtElapsed = 0L
+                mediaWasPlaying = false
+                mediaCompactGraceUntilElapsed = 0L
+                handler.removeCallbacks(mediaCompactGraceExpiry)
+            }
+        }
+    }
+
+    private fun chargeWaveSpacingDp(): Int {
+        val configuredSpacing = prefs.getInt("chargeWaveSpacingDp", -1)
+        if (configuredSpacing >= 3) return configuredSpacing.coerceIn(3, 24)
+        // Convert the old lobe-count preference into equivalent spacing without rewriting
+        // preferences from a service callback (which would trigger an overlay rebuild).
+        val oldLobes = prefs.getInt("chargeRingDensity", 7).coerceIn(3, 32)
+        val ringSize = prefs.getInt("chargeRingSize", 48).coerceIn(36, 80)
+        return (2.0 * Math.PI * ringSize * 0.36 / oldLobes).toInt().coerceIn(3, 24)
+    }
+
+    /** Circular Wave has its own slower range; old speed values retain their old timing. */
+    private fun chargeWaveCycleDurationMs(): Long {
+        val selectedWaveSpeed = prefs.getInt("chargeWaveSpeed", -1)
+        if (selectedWaveSpeed in 1..40) {
+            return (24_000L - (selectedWaveSpeed - 1) * 600L).coerceIn(600L, 24_000L)
+        }
+        val legacySpeed = prefs.getInt("chargeRingSpeed", 5).coerceIn(1, 30)
+        return (8_000L - (legacySpeed - 1) * 255L).coerceIn(580L, 8_000L)
+    }
+
+    private val chargeWaveMotionEpochMs = android.os.SystemClock.uptimeMillis()
+
+    /** All live ring sizes sample the same clock so their charged contour stays in phase. */
+    private fun chargeWavePhase(): Float {
+        val duration = chargeWaveCycleDurationMs()
+        val elapsed = (android.os.SystemClock.uptimeMillis() - chargeWaveMotionEpochMs).coerceAtLeast(0L)
+        return (elapsed % duration).toFloat() / duration
+    }
+
+    private fun chargeRemainderThicknessDp(): Int =
+        prefs.getInt("chargeRemainderThickness", 2).coerceIn(1, 6)
+
+    private fun chargeRemainderColor(): Int = when (prefs.getInt("chargeRemainderColor", 0)) {
+        1 -> 0xFF424242.toInt()
+        else -> 0xFF777777.toInt()
+    }
 
     // Charging state, filled by the battery receiver
     private var charging = false
     private var chargePct = 0
     private var chargeDetail = ""
+    private var chargePlugged = 0
 
     private val prefs by lazy { getSharedPreferences("capsule", MODE_PRIVATE) }
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "diag" || key == "queueStateSummary") return@OnSharedPreferenceChangeListener
+        if (key == "notificationBadgeSize" || key == "notificationBadgeColor") {
+            uiPost { applyNotificationBadgeAppearance() }
+            return@OnSharedPreferenceChangeListener
+        }
         if (key == "testPill") {
             uiPost { runTestPill() }
             return@OnSharedPreferenceChangeListener
@@ -316,7 +546,10 @@ class CapsuleService : NotificationListenerService() {
     }
 
     private val controllerCallback = object : MediaController.Callback() {
-        override fun onPlaybackStateChanged(state: PlaybackState?) = refreshMedia()
+        override fun onPlaybackStateChanged(state: PlaybackState?) {
+            updateMediaPauseGrace(state)
+            refreshMedia()
+        }
         override fun onMetadataChanged(metadata: MediaMetadata?) {
             // A metadata event may carry new artwork even when title/artist stay the same.
             panelArtworkToken = null
@@ -336,6 +569,11 @@ class CapsuleService : NotificationListenerService() {
         override fun onDown(e: MotionEvent): Boolean = true
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            // Keep the identity of the surface that received ACTION_DOWN. A queued
+            // notification arriving during the tap must not redirect it to another pill.
+            val tapOwner = if (tapGestureOwnerCaptured) tapGestureOwnerId else activityWinner()
+            tapGestureOwnerCaptured = false
+            tapGestureOwnerId = null
             // A call: a tap on the small call indicator opens the call pill
             if (callActive && !expanded) {
                 callDismissed = false
@@ -345,78 +583,79 @@ class CapsuleService : NotificationListenerService() {
             }
             // Collapsed pill with a waiting notification: bring it back
             val waiting = pending
-            if (waiting != null && !expanded && !showingNotif && !callActive) {
-                userFocusedNotification = true
-                presentNotif(waiting, 1)
-                setExpanded(true)
-                armNotifTimer()
+            if (waiting != null && !expanded && !showingNotif && !callActive &&
+                tapOwner in setOf(null, "notifications")) {
+                mediaNotificationKey = waiting.key
+                openMediaNotification()
                 return true
             }
             // First tap on a notification that has replies or buttons: show them
-            if (showingNotif && notifLevel == 1 && notifKey != null && notifHasMore() && !callActive) {
+            if (showingNotif && tapOwner in setOf(null, "notifications", "live") &&
+                notifLevel == 1 && notifKey != null && notifHasMore() && !callActive) {
                 notifLevel = 2
                 applyVisibility()
                 armNotifTimer()
                 return true
             }
             // Expanded charging pill: a tap opens the phone's battery screen
-            if (expanded && !showingNotif && !callActive && !qsActive() && !widgetActive() && chargeExpandedShown()) {
+            if (tapOwner == "charging" && expanded && !showingNotif && !callActive &&
+                !qsActive() && !widgetActive() && chargeExpandedShown()) {
                 openBatteryScreen()
                 return true
             }
-            // While music plays, a tap opens the music app
+            // A collapsed media tap follows the configured gesture (normally expand). Opening the
+            // source player is a deliberate tap from the expanded media surface only.
             val mc = controller
-            if (mc != null && showMusic() && !showingNotif && !callActive) {
-                launch(packageManager.getLaunchIntentForPackage(mc.packageName))
+            if (tapOwner == "media" && mc != null && showMusic() && !showingNotif && !callActive) {
+                if (!expanded) dispatchGesture("g_tap")
+                else launch(packageManager.getLaunchIntentForPackage(mc.packageName))
                 return true
             }
             // A tap on a notification opens it, as before
-            if (showingNotif && notifIntent != null && !callActive) {
+            if (showingNotif && tapOwner in setOf(null, "notifications", "live") &&
+                notifIntent != null && !callActive) {
                 runCatching { notifIntent?.send() }
                 removeQueuedNotification(notifKey)
                 handler.removeCallbacks(collapse)
                 collapse.run()
-            } else {
+            } else if (tapOwner == null || tapOwner == activityWinner()) {
                 dispatchGesture("g_tap")
             }
             return true
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
+            tapGestureOwnerCaptured = false
+            tapGestureOwnerId = null
             dispatchGesture("g_double")
             return true
         }
 
         override fun onLongPress(e: MotionEvent) {
+            tapGestureOwnerCaptured = false
+            tapGestureOwnerId = null
             dispatchGesture("g_long")
         }
 
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+            tapGestureOwnerCaptured = false
+            tapGestureOwnerId = null
             val start = e1 ?: return false
             val dx = e2.x - start.x
             val dy = e2.y - start.y
+            val owner = mainPillSwipeOwner()
             if (abs(dy) > dp(45) && dy > 0 && abs(dy) > abs(dx) * 1.15f &&
-                (pending != null || showingNotif)) {
-                // A downward swipe is an explicit expand gesture, not notification dismissal.
-                val waiting = pending
-                if (!showingNotif && waiting != null) {
-                    userFocusedNotification = true
-                    presentNotif(waiting, 1)
-                }
+                mainPillDownSwipeExpands(owner)) {
+                // Expand the activity under the touch. A queued notification cannot steal a
+                // charging/media/Maps gesture from the main pill.
+                openMainPillOwnerAfterDownSwipe(owner)
                 handler.removeCallbacks(collapse)
-                setExpanded(true)
+                if (!expanded) setExpanded(true)
                 armNotifTimer()
                 return true
             }
-            if (showingNotif && notifKey != null && abs(dx) > dp(60) && abs(dx) > abs(dy)) {
-                if (notificationQueue.size > 1) {
-                    browseQueuedNotification(if (dx < 0) -1 else 1)
-                    return true
-                }
-                removeQueuedNotification(notifKey)
-                cancelNotification(notifKey)
-                handler.removeCallbacks(collapse)
-                collapse.run()
+            if (mainPillNotificationSwipeTarget() && abs(dx) > dp(36) && abs(dx) > abs(dy)) {
+                finishSwipe(dx, vx)
                 return true
             }
             if (abs(dx) < dp(30) && abs(dy) < dp(30)) return false
@@ -462,7 +701,7 @@ class CapsuleService : NotificationListenerService() {
     }
 
     override fun onListenerConnected() {
-        KeepAlive.listenerConnected = true
+        KeepAlive.markListenerConnected(this)
         KeepAlive.schedule(this)
         diag("listener connected")
         if (root != null) return
@@ -499,6 +738,7 @@ class CapsuleService : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        KeepAlive.listenerConnected = false
         diag("service destroyed")
         teardown()
         super.onDestroy()
@@ -536,10 +776,12 @@ class CapsuleService : NotificationListenerService() {
     // Every 5 minutes: one line in the log, so a silent stop leaves a trace of exactly when it happened
     private fun heartbeat() {
         val acc = KeepAlive.ensureAccessibility(this)
+        val listener = KeepAlive.ensureListener(this)
+        if (KeepAlive.repairPending(this)) KeepAlive.schedule(this, 2_000L)
         val info = android.app.ActivityManager.MemoryInfo()
         getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(info)
         diag(
-            "alive: overlay=${root != null}, accessibility=$acc, free memory ${info.availMem / 1048576} MB" +
+            "alive: overlay=${root != null}, listener=$listener, accessibility=$acc, free memory ${info.availMem / 1048576} MB" +
                 (if (info.lowMemory) " (LOW)" else "")
         )
     }
@@ -556,11 +798,16 @@ class CapsuleService : NotificationListenerService() {
         handler.removeCallbacksAndMessages(null)
         runCatching { unregisterReceiver(batteryReceiver) }
         runCatching { unregisterReceiver(eventReceiver) }
+        albumArtPulseAnimator?.cancel()
+        albumArtPulseAnimator = null
         stopMic()
         closePanel(false)
         runCatching { prefs.unregisterOnSharedPreferenceChangeListener(prefListener) }
         controller?.unregisterCallback(controllerCallback)
         controller = null
+        lastMediaPlayingAtElapsed = 0L
+        mediaWasPlaying = false
+        mediaCompactGraceUntilElapsed = 0L
         runCatching { msm?.removeOnActiveSessionsChangedListener(sessionsListener) }
         root?.let { v -> runCatching { wm.removeView(v) } }
         root = null
@@ -591,7 +838,7 @@ class CapsuleService : NotificationListenerService() {
 
         miniW = if (cut != null) cut.width() + dp(20) else dp(96)
         miniH = maxOf(if (cut != null) cut.height() + dp(8) else dp(34), dp(40))
-        var topY = if (cut != null) (cut.top - dp(4)).coerceAtLeast(0) else dp(6)
+        var topY = if (cut != null) (cut.top - dp(4)).coerceAtLeast(0) else 0
         expW = minOf(screenW - dp(24), dp(340))
         expH = dp(64)
 
@@ -603,7 +850,7 @@ class CapsuleService : NotificationListenerService() {
         val land = uiCtx.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val topKey = if (land) "topYL" else "topY"
         val offKey = if (land) "offXL" else "offX"
-        if (prefs.contains(topKey)) topY = dp(prefs.getInt(topKey, 6))
+        if (prefs.contains(topKey)) topY = dp(prefs.getInt(topKey, 0))
         val offX = dp(prefs.getInt(offKey, 0))
         resolvedTopY = topY
         resolvedOffX = offX
@@ -680,12 +927,59 @@ class CapsuleService : NotificationListenerService() {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(3))
                 .apply { topMargin = dp(4) }
         }
+        mediaWaveProgress = SeekBar(uiCtx).apply {
+            contentDescription = "Track progress"
+            max = 1000
+            progressTintList = ColorStateList.valueOf(accent)
+            thumbTintList = ColorStateList.valueOf(Color.WHITE)
+            progressBackgroundTintList = ColorStateList.valueOf(0x44FFFFFF)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar, value: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    pillSeeking = true
+                    val duration = controller?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+                    if (duration > 0L) {
+                        val position = duration * value.coerceIn(0, sb.max) / sb.max.coerceAtLeast(1)
+                        elapsedText.text = fmt(position)
+                        remainText.text = "-" + fmt(duration - position)
+                    }
+                }
+                override fun onStartTrackingTouch(sb: SeekBar) { pillSeeking = true }
+                override fun onStopTrackingTouch(sb: SeekBar) {
+                    pillSeeking = false
+                    val mediaController = controller ?: return
+                    val duration = mediaController.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+                    if (duration > 0L) {
+                        val target = duration * sb.progress.coerceIn(0, sb.max) / sb.max.coerceAtLeast(1)
+                        mediaController.transportControls.seekTo(target.coerceIn(0L, duration))
+                    }
+                }
+            })
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(20))
+                .apply { topMargin = dp(3) }
+        }
+        miniMediaWaveform = MediaWaveformView(uiCtx).apply {
+            contentDescription = "Animated audio visualizer"
+            layoutParams = LinearLayout.LayoutParams(dp(38), dp(24)).apply { marginStart = dp(8); marginEnd = dp(8) }
+        }
         textCol = LinearLayout(uiCtx).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 .apply { marginStart = dp(10); marginEnd = dp(6) }
             addView(title)
-            addView(subtitle)
+            notificationBodyPanel = NotificationBodyPanel(uiCtx).apply {
+                clipChildren = true
+                clipToPadding = true
+                addView(subtitle, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT
+                ))
+                horizontalGestureHandler = { event -> onNotificationBodyTouch(event) }
+            }
+            addView(notificationBodyPanel, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            addView(mediaWaveProgress)
             addView(progress)
         }
 
@@ -700,6 +994,17 @@ class CapsuleService : NotificationListenerService() {
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(accent) }
             setColorFilter(Color.WHITE)
             contentDescription = "Play or pause playback"
+        }
+        miniPlayButton = ImageButton(uiCtx).apply {
+            setImageResource(R.drawable.ic_play)
+            background = mediaControlBackground()
+            setColorFilter(pillStyle().primary)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            isFocusable = true
+            contentDescription = "Play or pause playback"
+            layoutParams = LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginStart = dp(6) }
+            setOnClickListener { togglePlay(); peek(4000) }
         }
         btnForward10 = control(R.drawable.ic_forward_10, pillStyle().primary) {
             seekBy(10_000L)
@@ -717,10 +1022,39 @@ class CapsuleService : NotificationListenerService() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            setPadding(dp(4), dp(6), dp(4), dp(2))
             visibility = View.GONE
         }
-        callControlsRow.addView(btnDecline)
-        callControlsRow.addView(btnAnswer)
+        callDeclineLabel = TextView(uiCtx).apply {
+            text = "Decline"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(pillStyle().secondary)
+        }
+        callAnswerLabel = TextView(uiCtx).apply {
+            text = "Answer"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(pillStyle().secondary)
+        }
+        callDeclineGroup = LinearLayout(uiCtx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            addView(btnDecline)
+            addView(callDeclineLabel, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(3) })
+        }
+        callAnswerGroup = LinearLayout(uiCtx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            addView(btnAnswer)
+            addView(callAnswerLabel, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(3) })
+        }
+        callControlsRow.addView(callDeclineGroup)
+        callControlsRow.addView(callAnswerGroup)
 
         // Quick reply chips for message notifications that accept a reply
         val replies = (prefs.getString("replies", "Yes,Later,Busy") ?: "Yes,Later,Busy")
@@ -834,16 +1168,20 @@ class CapsuleService : NotificationListenerService() {
 
         // Music layout: artwork and visualizer, then controls, then the seek bar with times
         musicLayout = false
-        textCol.removeView(progress)
+        textCol.removeView(mediaWaveProgress)
         elapsedText = TextView(uiCtx).apply { setTextColor(Color.WHITE); textSize = 11f; isSingleLine = true }
         remainText = TextView(uiCtx).apply { setTextColor(Color.WHITE); textSize = 11f; isSingleLine = true }
-        progress.layoutParams = LinearLayout.LayoutParams(0, dp(4), 1f).apply {
+        mediaWaveProgress.layoutParams = LinearLayout.LayoutParams(0, dp(24), 1f).apply {
             marginStart = dp(6); marginEnd = dp(6)
         }
         artRow = LinearLayout(uiCtx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+            setOnTouchListener { _, event -> onNotificationBodyTouch(event) }
+            setOnClickListener {
+                if (shouldShowCollapsedNotificationPreview()) openMediaNotification()
+            }
         }
         ctrlRow = LinearLayout(uiCtx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -870,8 +1208,13 @@ class CapsuleService : NotificationListenerService() {
             ).apply { marginEnd = dp(12) }
         }
         chargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 9) },
-            { chargePct }, { pillStyle().primary }, { prefs.getInt("chargeRingDensity", 7) }, { prefs.getInt("chargeRingSpeed", 5) }).apply {
-            val size = prefs.getInt("chargeRingSize", 48).coerceIn(36, 64)
+            { chargePct }, { pillStyle().primary }, { chargeWaveSpacingDp() }, { prefs.getInt("chargeRingSpeed", 5) },
+            { prefs.getInt("chargeRingThickness", 3) }, { prefs.getInt("chargeWaveHeight", 9) },
+            { prefs.getInt("chargeWaveSoftness", 55) }, { prefs.getInt("chargeWaveInnerSpacingPercent", 28) },
+            { prefs.getBoolean("chargeMotionEnabled", true) }, { chargeRemainderThicknessDp() },
+            { chargeRemainderColor() }, { chargeWaveCycleDurationMs() }, { prefs.getInt("chargeRingSize", 48) },
+            { chargeWavePhase() }).apply {
+            val size = prefs.getInt("chargeRingSize", 48).coerceIn(36, 80)
             layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).apply { marginStart = dp(12) }
         }
         chargeTime = TextView(uiCtx).apply {
@@ -956,12 +1299,13 @@ class CapsuleService : NotificationListenerService() {
             setTextColor(Color.WHITE)
             textSize = 30f
             setTypeface(typeface, Typeface.BOLD)
-            isSingleLine = true
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
         }
         navStreet = TextView(uiCtx).apply {
             setTextColor(0xFFD0D0D0.toInt())
             textSize = 16f
-            isSingleLine = true
+            maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         val navMid = LinearLayout(uiCtx).apply {
@@ -972,7 +1316,7 @@ class CapsuleService : NotificationListenerService() {
             addView(navStreet)
         }
         navEta = TextView(uiCtx).apply {
-            setTextColor(0xFF30D158.toInt())
+            setTextColor(pillStyle().primary)
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
             isSingleLine = true
@@ -1034,9 +1378,11 @@ class CapsuleService : NotificationListenerService() {
             visibility = View.GONE
         }
         artRow.addView(miniVizSpacer)
+        artRow.addView(miniMediaWaveform)
+        artRow.addView(barsRow)
+        artRow.addView(miniPlayButton)
         artRow.addView(chargeBox)
         artRow.addView(navBox)
-        artRow.addView(barsRow)
         ctrlRow.addView(btnPrev)
         ctrlRow.addView(btnBack10)
         ctrlRow.addView(btnPlay)
@@ -1058,12 +1404,12 @@ class CapsuleService : NotificationListenerService() {
         }
         ctrlRow.addView(exitMedia)
         timeRow.addView(elapsedText)
-        timeRow.addView(progress)
+        timeRow.addView(mediaWaveProgress)
         timeRow.addView(remainText)
         mediaNotificationCard = LinearLayout(uiCtx).apply {
-            orientation = LinearLayout.HORIZONTAL
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(8), dp(8), dp(8))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
             background = notificationQueueSurface()
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                 .apply { topMargin = dp(8) }
@@ -1093,6 +1439,8 @@ class CapsuleService : NotificationListenerService() {
         mediaNotificationContent = LinearLayout(uiCtx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             addView(mediaNotificationIcon)
             addView(LinearLayout(uiCtx).apply {
@@ -1104,11 +1452,24 @@ class CapsuleService : NotificationListenerService() {
             })
             setOnTouchListener { _, event ->
                 when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> { mediaNotificationDownX = event.x; true }
+                    MotionEvent.ACTION_DOWN -> {
+                        mediaNotificationDownX = event.x
+                        mediaNotificationDownY = event.y
+                        true
+                    }
                     MotionEvent.ACTION_UP -> {
                         val dx = event.x - mediaNotificationDownX
-                        if (abs(dx) >= dp(32)) browseMediaNotification(if (dx < 0f) 1 else -1)
-                        else openMediaNotification()
+                        val dy = event.y - mediaNotificationDownY
+                        when {
+                            abs(dx) >= dp(32) && abs(dx) > abs(dy) -> {
+                                if (dx < 0f) dismissMediaNotification()
+                                else browseQueuedNotification(-1)
+                            }
+                            abs(dy) >= dp(32) -> {
+                                if (dy > 0f) openMediaNotification()
+                            }
+                            else -> toggleMediaNotificationDetails()
+                        }
                         true
                     }
                     MotionEvent.ACTION_CANCEL -> true
@@ -1116,20 +1477,48 @@ class CapsuleService : NotificationListenerService() {
                 }
             }
         }
-        mediaNotificationDismiss = TextView(uiCtx).apply {
-            text = "Dismiss"
-            contentDescription = "Dismiss this notification"
-            setTextColor(notificationQueueStyle().primary)
-            textSize = 11f
-            gravity = Gravity.CENTER
-            minHeight = dp(40)
-            minWidth = dp(60)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = notificationQueueControlBackground()
-            setOnClickListener { dismissMediaNotification() }
+        mediaNotificationHeader = LinearLayout(uiCtx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(mediaNotificationContent, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
-        mediaNotificationCard.addView(mediaNotificationContent)
-        mediaNotificationCard.addView(mediaNotificationDismiss)
+        mediaNotificationCard.addView(mediaNotificationHeader)
+        mediaNotificationActionsRow = LinearLayout(uiCtx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+        }
+        mediaNotificationActionButtons = List(2) { index ->
+            TextView(uiCtx).apply {
+                setTextColor(notificationQueueStyle().primary)
+                textSize = 12f
+                gravity = Gravity.CENTER
+                isSingleLine = true
+                ellipsize = TextUtils.TruncateAt.END
+                minHeight = dp(44)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                background = notificationQueueControlBackground()
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { if (index > 0) marginStart = dp(8) }
+                setOnClickListener { runMediaNotificationAction(index) }
+            }
+        }
+        mediaNotificationActionButtons.forEach { mediaNotificationActionsRow.addView(it) }
+        mediaNotificationCard.addView(mediaNotificationActionsRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(8) })
+        notificationQueueStackRows = LinearLayout(uiCtx).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        notificationQueueStack = CappedScroll(uiCtx, dp(132)).apply {
+            isFillViewport = false
+            clipToPadding = false
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(5) }
+            addView(notificationQueueStackRows)
+        }
         actionBtns = List(2) { idx ->
             TextView(uiCtx).apply {
                 setTextColor(Color.WHITE)
@@ -1167,8 +1556,13 @@ class CapsuleService : NotificationListenerService() {
         }
         notificationNext = queueButton("›", "Next notification") { browseQueuedNotification(1) }
         miniChargeRing = ChargeRingView(uiCtx, { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 9) },
-            { chargePct }, { pillStyle().primary }, { prefs.getInt("chargeRingDensity", 7) }, { prefs.getInt("chargeRingSpeed", 5) }).apply {
-            val size = (prefs.getInt("chargeRingSize", 48).coerceIn(36, 64) * 0.72f).toInt().coerceIn(26, 46)
+            { chargePct }, { pillStyle().primary }, { chargeWaveSpacingDp() }, { prefs.getInt("chargeRingSpeed", 5) },
+            { prefs.getInt("chargeRingThickness", 3) }, { prefs.getInt("chargeWaveHeight", 9) },
+            { prefs.getInt("chargeWaveSoftness", 55) }, { prefs.getInt("chargeWaveInnerSpacingPercent", 28) },
+            { prefs.getBoolean("chargeMotionEnabled", true) }, { chargeRemainderThicknessDp() },
+            { chargeRemainderColor() }, { chargeWaveCycleDurationMs() }, { prefs.getInt("chargeRingSize", 48) },
+            { chargeWavePhase() }).apply {
+            val size = (prefs.getInt("chargeRingSize", 48).coerceIn(36, 80) * 0.72f).toInt().coerceIn(26, 46)
             layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).apply { marginStart = dp(8); marginEnd = dp(2) }
             visibility = View.GONE
         }
@@ -1180,66 +1574,368 @@ class CapsuleService : NotificationListenerService() {
         row.addView(artRow)
         row.addView(ctrlRow)
         row.addView(timeRow)
+        taskPreviewTitle = TextView(uiCtx).apply {
+            textSize = 13f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(pillStyle().primary)
+            setPadding(dp(4), dp(4), dp(4), dp(5))
+        }
+        taskPreviewItems = LinearLayout(uiCtx).apply { orientation = LinearLayout.VERTICAL }
+        taskPreviewPanel = LinearLayout(uiCtx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = notificationQueueSurface()
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = dp(5) }
+            addView(taskPreviewTitle)
+            addView(taskPreviewItems)
+            addView(TextView(uiCtx).apply {
+                text = "Open Task Manager"
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setTextColor(pillStyle().accent)
+                setPadding(dp(8), dp(9), dp(8), dp(4))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    setExpanded(false)
+                    startActivity(Intent(this@CapsuleService, MainActivity::class.java)
+                        .putExtra("cat", "tasks")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            })
+            setOnTouchListener { _, event ->
+                if (!prefs.getBoolean("taskPreviewSwipe", true)) return@setOnTouchListener false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { taskPreviewDownX = event.rawX; false }
+                    MotionEvent.ACTION_UP -> {
+                        val dx = event.rawX - taskPreviewDownX
+                        if (abs(dx) > dp(36)) {
+                            taskPreviewPage = (taskPreviewPage + if (dx < 0) 1 else -1).coerceAtLeast(0)
+                            renderTaskPreview()
+                            true
+                        } else false
+                    }
+                    else -> false
+                }
+            }
+        }
         row.addView(mediaNotificationCard)
+        row.addView(notificationQueueStack)
+        row.addView(taskPreviewPanel)
         row.addView(qsGrid)
         row.addView(widgetImage)
         replyRow = LinearLayout(uiCtx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             visibility = View.GONE
         }
-        chips.forEach { replyRow.addView(it) }
-        actionBtns.forEach { replyRow.addView(it) }
-        replyRow.addView(notificationPrevious)
-        replyRow.addView(notificationPosition)
-        replyRow.addView(notificationNext)
+        notificationActionsRow = LinearLayout(uiCtx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        chips.forEach { notificationActionsRow.addView(it) }
+        actionBtns.forEach { notificationActionsRow.addView(it) }
+        notificationActionsRow.addView(notificationPrevious)
+        notificationActionsRow.addView(notificationPosition)
+        notificationActionsRow.addView(notificationNext)
+        notificationActionsScroll = android.widget.HorizontalScrollView(uiCtx).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            clipToPadding = false
+            visibility = View.GONE
+            addView(notificationActionsRow, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
+        replyRow.addView(notificationActionsScroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
         row.addView(replyRow)
         row.addView(callControlsRow)
         applyTextStyle()
-        val wrap = FrameLayout(uiCtx).apply {
+        notificationBubbleSlotActive = shouldShowNotificationBubble()
+        notificationBubbleLastSlotWidth = if (notificationBubbleSlotActive) dp(112) else 0
+        activityBubbleSlotActive = shouldShowActivityBubble()
+        activityBubbleLastSlotWidth = if (activityBubbleSlotActive) dp(80) + activityBubbleBadgeReserve() else 0
+        val wrap = object : FrameLayout(uiCtx) {
+            override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        expandSwipeDownX = event.rawX
+                        expandSwipeDownY = event.rawY
+                        expandSwipeDelegatedToChild = dedicatedGestureSurfaceAt(event.rawX, event.rawY)
+                        // Latch the main surface owner before children can consume this
+                        // gesture. A newly arriving notification must not retarget a tap
+                        // that began on media, Maps, or charging.
+                        tapGestureOwnerCaptured = !expandSwipeDelegatedToChild
+                        tapGestureOwnerId = if (expandSwipeDelegatedToChild) null else activityWinner()
+                        expandGestureActivityId = tapGestureOwnerId
+                        expandingBySwipe = false
+                        expandSwipeCaptured = false
+                        interceptingPillDownSwipe = false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX - expandSwipeDownX
+                        val dy = event.rawY - expandSwipeDownY
+                        if (!expandSwipeDelegatedToChild && shouldCapturePillDownSwipe(dx, dy)) {
+                            interceptingPillDownSwipe = true
+                            return true
+                        }
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        if (!interceptingPillDownSwipe) expandGestureActivityId = null
+                        expandSwipeDelegatedToChild = false
+                        if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                            interceptingPillDownSwipe = false
+                        }
+                    }
+                }
+                return super.onInterceptTouchEvent(event)
+            }
+        }.apply {
             setOnTouchListener { _, e -> onPillTouch(e) }
+            val badgeCorner = prefs.getString("notificationBadgeCorner", "top_end")
+                ?.takeIf { it in setOf("top_start", "top_end", "bottom_start", "bottom_end", "right_side") } ?: "top_end"
+            val sideBadgeSpace = if (badgeCorner == "right_side") dp(56) else 0
+            val leftNotificationSpace = notificationBubbleSlot()
+            val rightBubbleSpace = activityBubbleSlot()
             addView(
                 row,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT
-                ).apply { setMargins(pad, pad, pad, pad) }
+                ).apply { setMargins(pad + leftNotificationSpace, pad, pad + sideBadgeSpace + rightBubbleSpace, pad) }
             )
+            val badgeGravity = when (badgeCorner) {
+                "top_start" -> Gravity.TOP or Gravity.LEFT
+                "bottom_start" -> Gravity.BOTTOM or Gravity.LEFT
+                "bottom_end" -> Gravity.BOTTOM or Gravity.RIGHT
+                "right_side" -> Gravity.CENTER_VERTICAL or Gravity.RIGHT
+                else -> Gravity.TOP or Gravity.RIGHT
+            }
+            val visibleBadgeGravity = if (badgeCorner == "right_side") Gravity.CENTER_VERTICAL or Gravity.LEFT else badgeGravity
             notificationBadge = TextView(uiCtx).apply {
                 gravity = Gravity.CENTER
-                textSize = 10f
+                val badgeSize = notificationBadgeSizeDp()
+                textSize = badgeSize * 0.46f
                 setTypeface(typeface, Typeface.BOLD)
-                setTextColor(Color.WHITE)
-                minWidth = dp(20)
-                minHeight = dp(20)
-                setPadding(dp(5), 0, dp(5), 0)
+                setTextColor(notificationBadgeTextColor())
+                minWidth = dp(badgeSize)
+                minHeight = dp(badgeSize)
+                val horizontalPadding = dp((badgeSize / 8).coerceAtLeast(2))
+                setPadding(horizontalPadding, 0, horizontalPadding, 0)
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(notificationQueueStyle().accent)
+                    setColor(notificationBadgeFillColor())
                 }
                 elevation = dp(3).toFloat()
                 visibility = View.GONE
-                contentDescription = "Unread notifications"
-                setOnClickListener {
-                    val waiting = pending ?: return@setOnClickListener
-                    if (callActive || stopwatchStart > 0L || liveActivityIsShowing()) return@setOnClickListener
-                    handler.removeCallbacks(collapse)
-                    userFocusedNotification = true
-                    presentNotif(waiting, 1)
-                    setExpanded(true)
-                    armNotifTimer()
-                }
+                contentDescription = null
+                isClickable = false
+                isFocusable = false
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            addView(notificationBadge, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or Gravity.END
-            ).apply { topMargin = dp(1); marginEnd = dp(1) })
+            notificationBadgeTarget = FrameLayout(uiCtx).apply {
+                isClickable = true
+                isFocusable = true
+                contentDescription = "Unread notifications"
+                var badgeDownX = 0f
+                var badgeDownY = 0f
+                var badgeSwipeCaptured = false
+                var badgeExpandedFromSwipe = false
+                // The badge is a clickable child of the pill, so pill-level swipe handling
+                // never sees a gesture that starts here. Preserve taps, but let a deliberate
+                // vertical drag open the latest queued notification in the same pill.
+                setOnTouchListener { _, event ->
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            badgeDownX = event.rawX
+                            badgeDownY = event.rawY
+                            badgeSwipeCaptured = false
+                            badgeExpandedFromSwipe = false
+                            false
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val dy = event.rawY - badgeDownY
+                            val dx = event.rawX - badgeDownX
+                            val hasNotification = notificationQueue.isNotEmpty() || pending != null || showingNotif
+                            if (!badgeSwipeCaptured && !expanded && hasNotification && dy >= dp(10) &&
+                                abs(dy) > abs(dx) * 1.15f) {
+                                badgeSwipeCaptured = true
+                                badgeExpandedFromSwipe = true
+                                focusNotifications()
+                                val waiting = notificationQueue.values.lastOrNull() ?: pending
+                                if (!showingNotif && waiting != null && !callActive &&
+                                    stopwatchStart <= 0L && !liveActivityIsShowing()) {
+                                    mediaNotificationKey = waiting.key
+                                    openMediaNotification()
+                                }
+                                handler.removeCallbacks(collapse)
+                                if (!expanded) setExpanded(true)
+                                if (showingNotif) armNotifTimer()
+                                true
+                            } else if (badgeExpandedFromSwipe && expanded && dy <= dp(3)) {
+                                badgeExpandedFromSwipe = false
+                                setExpanded(false)
+                                true
+                            } else {
+                                badgeSwipeCaptured
+                            }
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            val wasCaptured = badgeSwipeCaptured
+                            badgeSwipeCaptured = false
+                            badgeExpandedFromSwipe = false
+                            wasCaptured
+                        }
+                        else -> badgeSwipeCaptured
+                    }
+                }
+                setOnClickListener {
+                    val waiting = notificationQueue.values.lastOrNull() ?: pending ?: return@setOnClickListener
+                    if (callActive || stopwatchStart > 0L || liveActivityIsShowing()) return@setOnClickListener
+                    mediaNotificationKey = waiting.key
+                    openMediaNotification()
+                }
+                addView(notificationBadge, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    visibleBadgeGravity
+                ).apply {
+                    when (badgeCorner) {
+                        "top_start" -> { topMargin = dp(1); leftMargin = dp(1) }
+                        "bottom_start" -> { bottomMargin = dp(1); leftMargin = dp(1) }
+                        "bottom_end" -> { bottomMargin = dp(1); rightMargin = dp(1) }
+                        "right_side" -> { leftMargin = dp(1); rightMargin = dp(1) }
+                        else -> { topMargin = dp(1); rightMargin = dp(1) }
+                    }
+                })
+            }
+            addView(notificationBadgeTarget, FrameLayout.LayoutParams(
+                dp(44), dp(44), badgeGravity
+            ).apply {
+                if (badgeCorner == "right_side") rightMargin = pad
+                if (badgeCorner == "top_start" || badgeCorner == "bottom_start") leftMargin = pad + leftNotificationSpace
+            })
+
+            activityBubbleIcon = ImageView(uiCtx).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                clipToOutline = true
+                outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL }
+                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginStart = dp(7) }
+            }
+            activityBubbleChargeRing = ChargeRingView(uiCtx,
+                { prefs.getInt("chargeIconStyle", 0) }, { prefs.getInt("chargeIconShape", 9) },
+                { chargePct }, { pillStyle().primary }, { chargeWaveSpacingDp() },
+                { prefs.getInt("chargeRingSpeed", 5) }, { prefs.getInt("chargeRingThickness", 3) },
+                { prefs.getInt("chargeWaveHeight", 9) }, { prefs.getInt("chargeWaveSoftness", 55) },
+                { prefs.getInt("chargeWaveInnerSpacingPercent", 28) },
+                { prefs.getBoolean("chargeMotionEnabled", true) }, { chargeRemainderThicknessDp() },
+                { chargeRemainderColor() }, { chargeWaveCycleDurationMs() }, { prefs.getInt("chargeRingSize", 48) },
+                { chargeWavePhase() }).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginStart = dp(6) }
+                visibility = View.GONE
+                contentDescription = "Charging progress"
+            }
+            activityBubbleLabel = TextView(uiCtx).apply {
+                setTextColor(pillStyle().primary)
+                textSize = 10f
+                isSingleLine = true
+                ellipsize = TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { marginStart = dp(5); marginEnd = dp(7) }
+            }
+            activityBubble = LinearLayout(uiCtx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = GradientDrawable().apply {
+                    orientation = GradientDrawable.Orientation.TOP_BOTTOM
+                    colors = intArrayOf(pillStyle().top, pillStyle().bottom)
+                    cornerRadius = dp(22).toFloat()
+                    setStroke(dp(1), pillStyle().outline)
+                }
+                elevation = dp(4).toFloat()
+                isClickable = true
+                isFocusable = true
+                visibility = if (activityBubbleSlotActive) View.VISIBLE else View.GONE
+                alpha = if (activityBubbleSlotActive) 1f else 0f
+                contentDescription = "Second active activity. Tap to focus and expand; swipe toward the main pill to switch; swipe away to hide."
+                addView(activityBubbleIcon)
+                addView(activityBubbleChargeRing)
+                addView(activityBubbleLabel)
+                setOnClickListener {
+                    val touchedKind = activityBubbleTouchDownKind
+                    activityBubbleTouchDownKind = null
+                    val renderedId = activityBubbleKey
+                    val kind = touchedKind ?: CapsuleActivityKind.entries.firstOrNull { it.id == renderedId }
+                    kind?.let { focusActivity(it, expand = true) }
+                }
+                setOnTouchListener { _, event -> onActivityBubbleTouch(event) }
+            }
+            addView(activityBubble, FrameLayout.LayoutParams(
+                dp(80), dp(48), Gravity.CENTER_VERTICAL or Gravity.RIGHT
+            ).apply {
+                val reserve = if (badgeCorner == "top_end" || badgeCorner == "bottom_end") activityBubbleBadgeReserve() else 0
+                rightMargin = pad + sideBadgeSpace + reserve
+            })
+
+            notificationBubbleIcon = ImageView(uiCtx).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                clipToOutline = true
+                outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(pillStyle().accent) }
+                layoutParams = LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginStart = dp(8); marginEnd = dp(6) }
+            }
+            notificationBubbleTitle = TextView(uiCtx).apply {
+                setTextColor(pillStyle().primary)
+                textSize = 10f
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            }
+            notificationBubbleBody = TextView(uiCtx).apply {
+                setTextColor(pillStyle().secondary)
+                textSize = 9f
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }
+            notificationBubble = LinearLayout(uiCtx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = themeBackground()
+                elevation = dp(4).toFloat()
+                isClickable = true
+                isFocusable = true
+                visibility = if (notificationBubbleSlotActive) View.VISIBLE else View.GONE
+                alpha = if (notificationBubbleSlotActive) 1f else 0f
+                contentDescription = "Latest notification. Tap or swipe down to expand; swipe left or right to dismiss."
+                addView(notificationBubbleIcon)
+                addView(LinearLayout(uiCtx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                        .apply { marginEnd = dp(8) }
+                    addView(notificationBubbleTitle)
+                    addView(notificationBubbleBody)
+                })
+                setOnClickListener {
+                    notificationQueue.values.lastOrNull()?.let { latest -> mediaNotificationKey = latest.key }
+                    openMediaNotification()
+                }
+                setOnTouchListener { _, event -> onNotificationBubbleTouch(event) }
+            }
+            addView(notificationBubble, FrameLayout.LayoutParams(
+                dp(112), dp(48), Gravity.CENTER_VERTICAL or Gravity.LEFT
+            ).apply { leftMargin = pad + dp(4) })
+            lastActivityBubbleVisible = activityBubbleSlotActive
         }
 
         lp = WindowManager.LayoutParams(
-            miniW + 2 * pad, miniH + 2 * pad,
+            miniW + 2 * pad + overlaySideSlots(), collapsedTargetHeight() + 2 * pad,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -1250,25 +1946,31 @@ class CapsuleService : NotificationListenerService() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            x = offX
-            y = (topY - pad).coerceAtLeast(0)
+            x = offX + (overlayRightSlots() - overlayLeftSlots()) / 2
+            y = topY - pad
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
         if (expanded) {
-            lp.width = expW + 2 * pad
+            lp.width = expandedTargetWidth() + 2 * pad + sideBadgeSlot()
             lp.height = targetInnerH() + 2 * pad
+        } else {
+            lp.width = compactTargetWidth() + 2 * pad + overlaySideSlots()
         }
 
         if (prefs.getBoolean("blur", false)) applyBlur()
         stopSpring()
         pill = row
         root = wrap
+        syncOverlayRowInsets()
+        renderActivityBubble(presentationState().secondary)
+        updateNotificationBubble(presentationState())
         applyVisibility()
         wm.addView(wrap, lp)
     }
 
     private fun applyTextStyle() {
-        val k = prefs.getInt("textScale", 100) / 100f
+        val k = (prefs.getInt("textScale", 100) / 100f) *
+            (prefs.getInt("sectionTextScale_${activePillSizingSection()}", 100).coerceIn(80, 160) / 100f)
         val face = Typeface.create(prefs.getString("fontFamily", "default") ?: "default", Typeface.NORMAL)
         for (tv in listOf(miniText, title, subtitle) + chips) tv.typeface = face
         miniText.textSize = 13f * k
@@ -1361,8 +2063,9 @@ class CapsuleService : NotificationListenerService() {
     private fun widgetActive(): Boolean {
         if (widgetBitmap == null || !expanded || callActive || showingNotif) return false
         if (imageOpen) return true
-        val playing = showMusic() && controller?.playbackState?.state == PlaybackState.STATE_PLAYING
-        return prefs.getBoolean("imageWidget", false) && !playing
+        val mediaOwnsExpandedSurface = showMusic() && controller != null &&
+            (mediaIsPlaying() || mediaSessionCanResume())
+        return prefs.getBoolean("imageWidget", false) && !mediaOwnsExpandedSurface
     }
 
     // Loads the chosen picture, scaled down so it stays light in memory
@@ -1410,19 +2113,506 @@ class CapsuleService : NotificationListenerService() {
         return notificationRank >= 0 && currentRank >= 0 && notificationRank < currentRank
     }
 
-    private fun activityWinner(): String? {
-        if (callActive) return "calls"
-        if (stopwatchStart > 0L) return "stopwatch"
-        if (userFocusedNotification && showingNotif && !liveActivityIsShowing()) return "notifications"
-        fun active(name: String): Boolean = when (name) {
-            "live" -> liveActivityIsShowing()
-            "notifications" -> showingNotif && !liveActivityIsShowing()
-            "media" -> showMusic() && controller != null
-            "navigation" -> prefs.getBoolean("mapsInfo", true) && MapsNav.active
-            "charging" -> showCharging() && charging
-            else -> false
+    /**
+     * Translate service-owned source state into a pure schedule. Queue contents remain owned by
+     * notificationQueue (their actions, dismissal and history are service concerns); this schedule
+     * decides which source owns the pill and whether exactly one notification companion can fit.
+     */
+    private fun presentationState(): CapsulePresentationState {
+        val live = liveActivityIsShowing()
+        val events = listOf(
+            CapsuleActivityEvent(CapsuleActivityKind.CALL, callActive, persistent = true),
+            CapsuleActivityEvent(CapsuleActivityKind.STOPWATCH, stopwatchStart > 0L, persistent = true),
+            CapsuleActivityEvent(CapsuleActivityKind.LIVE, live, persistent = true),
+            CapsuleActivityEvent(
+                CapsuleActivityKind.NOTIFICATION,
+                showingNotif && !live,
+                persistent = false
+            ),
+            CapsuleActivityEvent(
+                CapsuleActivityKind.MEDIA,
+                mediaCompactActivityActive() || (expanded && mediaSessionCanResume()),
+                persistent = true
+            ),
+            CapsuleActivityEvent(
+                CapsuleActivityKind.NAVIGATION,
+                prefs.getBoolean("mapsInfo", true) && MapsNav.active,
+                persistent = true
+            ),
+            CapsuleActivityEvent(CapsuleActivityKind.CHARGING, showCharging() && charging, persistent = true)
+        )
+        if (focusedActivityId != null && events.none { it.active && it.kind.id == focusedActivityId }) {
+            focusedActivityId = null
         }
-        return activityPriorityOrder().firstOrNull(::active)
+        val schedule = CapsuleActivityScheduler.schedule(
+            CapsuleActivitySnapshot(
+                events = events,
+                priorityOrder = activityPriorityOrder(),
+                queuedNotificationCount = notificationQueue.size + notificationOverflow,
+                notificationFocusedByUser = userFocusedNotification,
+                userFocusedActivity = focusedActivityId
+            )
+        )
+        return CapsulePresentationStateMachine.reduce(schedule)
+    }
+
+    private fun activityWinner(): String? = presentationState().foreground?.id
+
+    /** A deliberate notification selection supersedes any activity previously focused from its bubble. */
+    private fun focusNotifications() {
+        focusedActivityId = null
+        userFocusedNotification = true
+    }
+
+    private fun tasksPreviewEnabled(): Boolean =
+        prefs.getBoolean("taskPreviewIdleEnabled", prefs.getBoolean("taskPreviewEnabled", true))
+
+    private fun pillIsIdleForTasks(): Boolean = tasksPreviewEnabled() && activityWinner() == null &&
+        !callActive && stopwatchStart <= 0L && !showingNotif && notificationQueue.isEmpty() &&
+        !liveActivityIsShowing() && !qsActive() && !widgetActive() &&
+        !(lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true))
+
+    private fun idleTasksPreviewVisible(): Boolean = expanded && pillIsIdleForTasks()
+
+    private fun companionHiddenScale(): Float = when (pillAnimationStyle()) {
+        "liquid_morph" -> 0.72f
+        "continuity" -> 0.80f
+        "settling_dock" -> 0.90f
+        else -> 0.66f
+    }
+
+    private fun companionOffset(): Float = dp(when (pillAnimationStyle()) {
+        "liquid_morph" -> 16
+        "continuity" -> 14
+        "settling_dock" -> 22
+        else -> 18
+    }).toFloat()
+
+    /** Side pills borrow the selected main-pill motion profile, then add a style-specific tether. */
+    private fun companionMotionProfile(expanding: Boolean): CapsuleMotionProfile = CapsuleMotionProfile.from(
+        prefs.getString("springSpeed", "medium") ?: "medium",
+        pillAnimationStyle(),
+        expanding = expanding
+    )
+
+    private fun companionDamping(profile: CapsuleMotionProfile): Float = when (pillAnimationStyle()) {
+        "liquid_morph" -> (profile.dampingRatio * 0.91f).coerceAtLeast(0.58f)
+        "continuity" -> profile.dampingRatio
+        "settling_dock" -> (profile.dampingRatio * 1.04f).coerceAtMost(1.25f)
+        else -> (profile.dampingRatio * 0.84f).coerceAtLeast(0.58f)
+    }
+
+    private fun renderActivityBubble(kind: CapsuleActivityKind?) {
+        if (!::activityBubble.isInitialized || kind == null) return
+        val nextId = kind.id
+        val changed = activityBubbleKey != null && activityBubbleKey != nextId
+        activityBubbleKey = nextId
+        val packageLabel = controller?.packageName?.let(::appLabel)
+        val text = when (kind) {
+            CapsuleActivityKind.MEDIA -> controller?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+                ?.takeIf { it.isNotBlank() } ?: packageLabel ?: "Media"
+            CapsuleActivityKind.NAVIGATION -> MapsNav.turnDistance.ifBlank {
+                MapsNav.distanceLeft.ifBlank { MapsNav.eta.ifBlank { "Maps" } }
+            }
+            CapsuleActivityKind.CHARGING -> "$chargePct%"
+            CapsuleActivityKind.LIVE -> liveChronometerLabel.ifBlank { title.text?.toString().orEmpty().ifBlank { "Activity" } }
+            else -> return
+        }
+        val drawable = when (kind) {
+            CapsuleActivityKind.MEDIA -> {
+                val artwork = controller?.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+                    ?: controller?.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                if (artwork != null) android.graphics.drawable.BitmapDrawable(resources, artwork)
+                else controller?.packageName?.let(::appIcon)
+            }
+            CapsuleActivityKind.NAVIGATION -> MapsNav.arrow?.let { android.graphics.drawable.BitmapDrawable(resources, it) }
+                ?: ContextCompat.getDrawable(this, navArrowRes(MapsNav.direction))
+            CapsuleActivityKind.CHARGING -> null
+            CapsuleActivityKind.LIVE -> ContextCompat.getDrawable(this, R.drawable.ic_tile_timer)
+            else -> null
+        }
+        activityBubbleLabel.text = text
+        activityBubbleLabel.contentDescription = text
+        activityBubbleIcon.setImageDrawable(drawable)
+        activityBubbleIcon.visibility = vis(kind != CapsuleActivityKind.CHARGING)
+        activityBubbleChargeRing.visibility = vis(kind == CapsuleActivityKind.CHARGING)
+        val bubbleChargeScale = prefs.getInt("sectionIconScale_charging", 100).coerceIn(70, 160) / 100f
+        val bubbleRingDp = (prefs.getInt("chargeRingSize", 48).coerceIn(36, 80) * 0.48f * bubbleChargeScale)
+            .toInt().coerceIn(18, 34)
+        (activityBubbleChargeRing.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
+            params.width = dp(bubbleRingDp)
+            params.height = dp(bubbleRingDp)
+            activityBubbleChargeRing.layoutParams = params
+        }
+        activityBubbleChargeRing.refreshAnimationState()
+        activityBubbleIcon.clearColorFilter()
+        activityBubble.contentDescription = "$text. Tap to expand this activity; swipe toward the main pill to switch; swipe away to hide this bubble."
+
+        val params = activityBubble.layoutParams as? FrameLayout.LayoutParams
+        if (params != null) {
+            val corner = prefs.getString("notificationBadgeCorner", "top_end")
+            val badgeSafe = if (corner == "top_end" || corner == "bottom_end") activityBubbleBadgeReserve() else 0
+            params.rightMargin = touchPad() + sideBadgeSlot() + badgeSafe
+            activityBubble.layoutParams = params
+        }
+        if (changed && activityBubbleTargetVisible && motionEnabled()) {
+            if (!bubbleSpringActive) {
+                springBubbleX.snapTo(-companionOffset())
+                springBubbleScale.snapTo(companionHiddenScale())
+                springBubbleAlpha.snapTo(0f)
+            }
+            springBubbleX.retarget(0f)
+            springBubbleScale.retarget(1f)
+            springBubbleAlpha.retarget(1f)
+            bubbleSpringActive = true
+            postSpringFrame()
+        }
+    }
+
+    private fun renderNotificationBubble(state: CapsulePresentationState = presentationState()) {
+        if (!::notificationBubble.isInitialized) return
+        val item = notificationQueue.values.lastOrNull()
+        if (item == null) {
+            notificationBubbleKey = null
+            return
+        }
+        notificationBubbleKey = item.key
+        notificationBubbleIcon.setImageDrawable(appIcon(item.pkg))
+        notificationBubbleTitle.text = item.title.ifBlank { appLabel(item.pkg) }
+        notificationBubbleBody.text = item.body.ifBlank { appLabel(item.pkg) }
+        notificationBubble.contentDescription =
+            "Latest notification from ${appLabel(item.pkg)}. ${item.title}. Tap to open, swipe left or right to dismiss."
+        val style = pillStyle()
+        notificationBubble.background = themeBackground()
+        notificationBubbleTitle.setTextColor(style.primary)
+        notificationBubbleBody.setTextColor(style.secondary)
+        notificationBubbleIcon.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(style.accent)
+        }
+        notificationBubble.pivotX = notificationBubble.width.toFloat()
+        notificationBubble.pivotY = notificationBubble.height / 2f
+        (notificationBubble.layoutParams as? FrameLayout.LayoutParams)?.let { params ->
+            params.leftMargin = touchPad() + dp(4)
+            notificationBubble.layoutParams = params
+        }
+        notificationBubble.contentDescription =
+            "Latest notification from ${appLabel(item.pkg)}. ${item.title}. Tap or swipe down to expand; swipe left or right to dismiss."
+    }
+
+    private fun updateNotificationBubble(state: CapsulePresentationState = presentationState()) {
+        if (!::notificationBubble.isInitialized) return
+        val desired = shouldShowNotificationBubble(state)
+        val previousKey = notificationBubbleKey
+        renderNotificationBubble(state)
+        val displayedNotificationChanged = previousKey != notificationBubbleKey
+        if (desired != notificationBubbleTargetVisible) {
+            notificationBubbleMotionExpanding = companionMotionExpansionOverride ?: desired
+        }
+        if (desired) {
+            val entering = !notificationBubbleTargetVisible
+            notificationBubbleTargetVisible = true
+            notificationBubbleHidePending = false
+            val requiredSlot = dp(112)
+            if (!notificationBubbleSlotActive || notificationBubbleLastSlotWidth != requiredSlot) {
+                notificationBubbleSlotActive = true
+                notificationBubbleLastSlotWidth = requiredSlot
+                syncOverlayRowInsets()
+                animateSize()
+            }
+            notificationBubble.visibility = View.VISIBLE
+            notificationBubble.pivotX = notificationBubble.width.toFloat()
+            notificationBubble.pivotY = notificationBubble.height / 2f
+            if (entering && motionEnabled()) {
+                if (!notificationSpringActive) {
+                    notificationSpringX.snapTo(companionOffset())
+                    notificationSpringScale.snapTo(companionHiddenScale())
+                    notificationSpringAlpha.snapTo(0f)
+                }
+                notificationSpringX.retarget(0f)
+                notificationSpringScale.retarget(1f)
+                notificationSpringAlpha.retarget(1f)
+                notificationSpringActive = true
+                postSpringFrame()
+            } else if (displayedNotificationChanged &&
+                (abs(notificationBubble.translationX) > 1f || notificationBubble.scaleX < 0.999f ||
+                    notificationBubble.alpha < 0.999f)) {
+                // Restore a replacement notification to its slot if the previous one was swiped.
+                if (motionEnabled()) {
+                    notificationSpringX.snapTo(notificationBubble.translationX)
+                    notificationSpringScale.snapTo(notificationBubble.scaleX)
+                    notificationSpringAlpha.snapTo(notificationBubble.alpha)
+                    notificationSpringX.retarget(0f)
+                    notificationSpringScale.retarget(1f)
+                    notificationSpringAlpha.retarget(1f)
+                    notificationSpringActive = true
+                    postSpringFrame()
+                } else {
+                    notificationSpringX.snapTo(0f)
+                    notificationSpringScale.snapTo(1f)
+                    notificationSpringAlpha.snapTo(1f)
+                    notificationBubble.translationX = 0f
+                    notificationBubble.scaleX = 1f
+                    notificationBubble.scaleY = 1f
+                    notificationBubble.alpha = 1f
+                }
+            } else if (!motionEnabled()) {
+                notificationSpringX.snapTo(0f)
+                notificationSpringScale.snapTo(1f)
+                notificationSpringAlpha.snapTo(1f)
+                notificationBubble.translationX = 0f
+                notificationBubble.scaleX = 1f
+                notificationBubble.scaleY = 1f
+                notificationBubble.alpha = 1f
+            }
+            return
+        }
+
+        if (!notificationBubbleSlotActive || notificationBubbleHidePending) return
+        notificationBubbleTargetVisible = false
+        if (!motionEnabled()) {
+            val previousSideSlots = overlaySideSlots()
+            notificationBubble.visibility = View.GONE
+            notificationBubbleSlotActive = false
+            notificationBubbleLastSlotWidth = 0
+            notificationBubble.translationX = companionOffset()
+            notificationBubble.scaleX = companionHiddenScale()
+            notificationBubble.scaleY = companionHiddenScale()
+            notificationBubble.alpha = 0f
+            releaseCompanionSlotWithoutMainMotion(previousSideSlots)
+            return
+        }
+        notificationBubbleHidePending = true
+        notificationSpringX.retarget(companionOffset())
+        notificationSpringScale.retarget(companionHiddenScale())
+        notificationSpringAlpha.retarget(0f)
+        notificationSpringActive = true
+        postSpringFrame()
+    }
+
+    private fun onNotificationBubbleTouch(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                notificationBubbleDownX = event.rawX
+                notificationBubbleDownY = event.rawY
+                notificationBubbleSwiping = false
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.rawX - notificationBubbleDownX
+                val dy = event.rawY - notificationBubbleDownY
+                if (maxOf(abs(dx), abs(dy)) > dp(12)) notificationBubbleSwiping = true
+                if (notificationBubbleSwiping) {
+                    notificationBubble.translationX = dx.coerceIn(-dp(40).toFloat(), dp(40).toFloat())
+                    val pull = (maxOf(abs(dx), abs(dy)) / dp(90).toFloat()).coerceIn(0f, 1f)
+                    notificationBubble.scaleX = 1f - pull * 0.04f
+                    notificationBubble.scaleY = 1f - pull * 0.04f
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val dx = event.rawX - notificationBubbleDownX
+                val dy = event.rawY - notificationBubbleDownY
+                notificationSpringX.snapTo(notificationBubble.translationX)
+                notificationSpringScale.snapTo(notificationBubble.scaleX)
+                notificationSpringAlpha.snapTo(notificationBubble.alpha)
+                if (!notificationBubbleSwiping) {
+                    notificationBubble.performClick()
+                } else if (abs(dx) >= dp(36) && abs(dx) > abs(dy)) {
+                    dismissMediaNotification(notificationBubbleKey)
+                } else if (dy >= dp(28)) {
+                    notificationQueue.values.lastOrNull()?.let { latest ->
+                        mediaNotificationKey = latest.key
+                        openMediaNotification()
+                    }
+                } else {
+                    notificationSpringX.retarget(0f)
+                    notificationSpringScale.retarget(1f)
+                    notificationSpringAlpha.retarget(1f)
+                    notificationSpringActive = motionEnabled()
+                    if (notificationSpringActive) postSpringFrame()
+                }
+                notificationBubbleSwiping = false
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                notificationBubbleSwiping = false
+                notificationSpringX.snapTo(notificationBubble.translationX)
+                notificationSpringScale.snapTo(notificationBubble.scaleX)
+                notificationSpringAlpha.snapTo(notificationBubble.alpha)
+                notificationSpringX.retarget(0f)
+                notificationSpringScale.retarget(1f)
+                notificationSpringAlpha.retarget(1f)
+                notificationSpringActive = motionEnabled()
+                if (notificationSpringActive) postSpringFrame()
+                return true
+            }
+        }
+        return true
+    }
+
+    private fun updateActivityBubble(state: CapsulePresentationState = presentationState()) {
+        if (!::activityBubble.isInitialized) return
+        if (suppressedActivityBubbleKey != null && suppressedActivityBubbleKey != state.secondary?.id) {
+            suppressedActivityBubbleKey = null
+        }
+        val desired = shouldShowActivityBubble(state)
+        val activity = state.secondary
+        if (desired != activityBubbleTargetVisible) {
+            activityBubbleMotionExpanding = companionMotionExpansionOverride ?: desired
+        }
+        if (desired) {
+            val entering = !activityBubbleTargetVisible
+            activityBubbleTargetVisible = true
+            activityBubbleHidePending = false
+            val requiredSlot = dp(80) + activityBubbleBadgeReserve()
+            if (!activityBubbleSlotActive) {
+                activityBubbleSlotActive = true
+                activityBubbleLastSlotWidth = requiredSlot
+                syncOverlayRowInsets()
+                animateSize()
+            } else if (activityBubbleLastSlotWidth != requiredSlot) {
+                activityBubbleLastSlotWidth = requiredSlot
+                syncOverlayRowInsets()
+                animateSize()
+            }
+            activityBubble.visibility = View.VISIBLE
+            renderActivityBubble(activity)
+            if (entering && motionEnabled()) {
+                if (!bubbleSpringActive) {
+                    springBubbleX.snapTo(-companionOffset())
+                    springBubbleScale.snapTo(companionHiddenScale())
+                    springBubbleAlpha.snapTo(0f)
+                }
+                springBubbleX.retarget(0f)
+                springBubbleScale.retarget(1f)
+                springBubbleAlpha.retarget(1f)
+                bubbleSpringActive = true
+                postSpringFrame()
+            } else if (!motionEnabled()) {
+                springBubbleX.snapTo(0f)
+                springBubbleScale.snapTo(1f)
+                springBubbleAlpha.snapTo(1f)
+                activityBubble.translationX = 0f
+                activityBubble.scaleX = 1f
+                activityBubble.scaleY = 1f
+                activityBubble.alpha = 1f
+            }
+            lastActivityBubbleVisible = true
+            return
+        }
+
+        if (!activityBubbleSlotActive || activityBubbleHidePending) return
+        activityBubbleTargetVisible = false
+        if (!motionEnabled()) {
+            val previousSideSlots = overlaySideSlots()
+            activityBubble.visibility = View.GONE
+            activityBubbleSlotActive = false
+            activityBubbleLastSlotWidth = 0
+            activityBubble.translationX = -companionOffset()
+            activityBubble.scaleX = companionHiddenScale()
+            activityBubble.scaleY = companionHiddenScale()
+            activityBubble.alpha = 0f
+            lastActivityBubbleVisible = false
+            releaseCompanionSlotWithoutMainMotion(previousSideSlots)
+            return
+        }
+        activityBubbleHidePending = true
+        springBubbleX.retarget(-companionOffset())
+        springBubbleScale.retarget(companionHiddenScale())
+        springBubbleAlpha.retarget(0f)
+        bubbleSpringActive = true
+        postSpringFrame()
+        lastActivityBubbleVisible = false
+    }
+
+    private fun focusActivity(kind: CapsuleActivityKind, expand: Boolean) {
+        val state = presentationState()
+        if (kind != state.secondary && kind.id != focusedActivityId) return
+        focusedActivityId = kind.id
+        userFocusedNotification = false
+        suppressedActivityBubbleKey = null
+        handler.removeCallbacks(collapse)
+        if (expand) setExpanded(true) else applyVisibility()
+    }
+
+    private fun hideActivityBubbleForCurrentEvent() {
+        suppressedActivityBubbleKey = presentationState().secondary?.id
+        if (suppressedActivityBubbleKey == null) return
+        uiPost { applyVisibility() }
+    }
+
+    private fun onActivityBubbleTouch(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                activityBubbleTouchDownX = event.rawX
+                activityBubbleTouchDownY = event.rawY
+                activityBubbleTouchDownKind = presentationState().secondary
+                activityBubbleSwiping = false
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.rawX - activityBubbleTouchDownX
+                val dy = event.rawY - activityBubbleTouchDownY
+                if (abs(dx) > dp(12) || abs(dy) > dp(12)) activityBubbleSwiping = true
+                if (activityBubbleSwiping) {
+                    // Let the side surface follow the finger slightly. The main pill gives a
+                    // restrained counter-pressure so the two surfaces read as one system.
+                    val pull = (abs(dx) / dp(96).toFloat()).coerceIn(0f, 1f)
+                    activityBubble.translationX = dx.coerceIn(-dp(22).toFloat(), dp(18).toFloat())
+                    activityBubble.scaleX = 1f - pull * 0.035f
+                    activityBubble.scaleY = 1f - pull * 0.035f
+                    animatePress(1f - pull * 0.018f)
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val dx = event.rawX - activityBubbleTouchDownX
+                val dy = event.rawY - activityBubbleTouchDownY
+                val kind = activityBubbleTouchDownKind ?: presentationState().secondary
+                springBubbleX.snapTo(activityBubble.translationX)
+                springBubbleScale.snapTo(activityBubble.scaleX)
+                springBubbleAlpha.snapTo(activityBubble.alpha)
+                animatePress(1f)
+                if (!activityBubbleSwiping) {
+                    activityBubble.performClick()
+                } else if (abs(dx) > abs(dy) && abs(dx) >= dp(28)) {
+                    activityBubbleTouchDownKind = null
+                    if (dx < 0f) kind?.let { focusActivity(it, expand = false) }
+                    else hideActivityBubbleForCurrentEvent()
+                } else if (dy >= dp(28)) {
+                    activityBubbleTouchDownKind = null
+                    kind?.let { focusActivity(it, expand = true) }
+                } else if (dy <= -dp(28)) {
+                    activityBubbleTouchDownKind = null
+                    kind?.let { focusActivity(it, expand = false) }
+                } else {
+                    activityBubbleTouchDownKind = null
+                    springBubbleX.retarget(0f)
+                    springBubbleScale.retarget(1f)
+                    springBubbleAlpha.retarget(1f)
+                    bubbleSpringActive = true
+                    postSpringFrame()
+                }
+                activityBubbleSwiping = false
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                activityBubbleSwiping = false
+                activityBubbleTouchDownKind = null
+                springBubbleX.snapTo(activityBubble.translationX)
+                springBubbleScale.snapTo(activityBubble.scaleX)
+                springBubbleAlpha.snapTo(activityBubble.alpha)
+                springBubbleX.retarget(0f)
+                springBubbleScale.retarget(1f)
+                springBubbleAlpha.retarget(1f)
+                bubbleSpringActive = true
+                animatePress(1f)
+                postSpringFrame()
+                return true
+            }
+        }
+        return true
     }
 
     private fun canPromoteLiveActivity(key: String, incomingPriority: Int): Boolean {
@@ -1449,7 +2639,7 @@ class CapsuleService : NotificationListenerService() {
 
     private fun pinnedPackages(): List<String> =
         if (!prefs.getBoolean("pinnedOn", true)) emptyList()
-        else (prefs.getString("pinned", "") ?: "").split(",").map { it.trim() }.filter { it.isNotEmpty() }.take(4)
+        else (prefs.getString("pinned", "") ?: "").split(",").map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(8)
 
     private fun appLabel(pkg: String): String = runCatching {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
@@ -1606,6 +2796,10 @@ class CapsuleService : NotificationListenerService() {
             setColor(pillAccent())
         }
         btnPlay.setColorFilter(style.primary)
+        if (::miniPlayButton.isInitialized) {
+            miniPlayButton.background = mediaControlBackground()
+            miniPlayButton.setColorFilter(style.primary)
+        }
     }
 
     private fun control(res: Int, tint: Int, onClick: () -> Unit) = ImageButton(uiCtx).apply {
@@ -1649,24 +2843,109 @@ class CapsuleService : NotificationListenerService() {
 
     // ---------- touch and gestures ----------
 
-    private fun onPillTouch(e: MotionEvent): Boolean {
-        // Press feedback follows the same reduced-motion policy as pill transitions.
-        // Keep the view at its neutral scale when either app or system animations are disabled.
-        if (motionEnabled()) {
-            when (e.action) {
-                MotionEvent.ACTION_DOWN ->
-                    pill?.animate()?.scaleX(0.94f)?.scaleY(0.94f)?.setDuration(140)
-                        ?.setInterpolator(android.view.animation.DecelerateInterpolator())?.start()
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                    pill?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(260)
-                        ?.setInterpolator(android.view.animation.DecelerateInterpolator())?.start()
-            }
-        } else if (e.action == MotionEvent.ACTION_DOWN || e.action == MotionEvent.ACTION_UP || e.action == MotionEvent.ACTION_CANCEL) {
-            pill?.animate()?.cancel()
-            pill?.scaleX = 1f
-            pill?.scaleY = 1f
+    private fun touchInsideVisibleView(view: View?, rawX: Float, rawY: Float): Boolean {
+        if (view == null || !view.isShown || view.width <= 0 || view.height <= 0) return false
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        val scaledWidth = view.width * view.scaleX.coerceAtLeast(0f)
+        val scaledHeight = view.height * view.scaleY.coerceAtLeast(0f)
+        return rawX >= location[0] && rawX <= location[0] + scaledWidth &&
+            rawY >= location[1] && rawY <= location[1] + scaledHeight
+    }
+
+    /** Companion pills and the count badge own their gestures; never route them as main-pill drags. */
+    private fun dedicatedGestureSurfaceAt(rawX: Float, rawY: Float): Boolean =
+        (::activityBubble.isInitialized && activityBubbleSlotActive &&
+            touchInsideVisibleView(activityBubble, rawX, rawY)) ||
+            (::notificationBubble.isInitialized && notificationBubbleSlotActive &&
+                touchInsideVisibleView(notificationBubble, rawX, rawY)) ||
+            (::notificationBadgeTarget.isInitialized && ::notificationBadge.isInitialized &&
+                notificationBadge.visibility == View.VISIBLE &&
+                touchInsideVisibleView(notificationBadgeTarget, rawX, rawY))
+
+    private fun mainPillSwipeOwner() = expandGestureActivityId ?: activityWinner()
+
+    /** A queued notification may expand only when the gesture began on its own main surface. */
+    private fun mainPillDownSwipeExpands(owner: String?): Boolean {
+        val configured = prefs.getString("g_down", CapsulePrefs.defaultFor("g_down")) == "expand"
+        val activityOwnsSurface = owner == "media" || owner == "navigation" || owner == "charging" ||
+            owner == "calls" || owner == "stopwatch" || owner == "live"
+        return if (activityOwnsSurface) {
+            configured
+        } else {
+            // Idle notification expansion follows the explicit swipe-down action too;
+            // don't let a queued message hijack a different configured gesture.
+            configured || ((owner == null || owner == "notifications") && (pending != null || showingNotif))
         }
-        // Drag sideways to dismiss: a notification is removed, a call pill is closed (the call itself carries on)
+    }
+
+    private fun shouldCapturePillDownSwipe(dx: Float, dy: Float, owner: String? = mainPillSwipeOwner()): Boolean =
+        !expanded && !expandSwipeCaptured && mainPillDownSwipeExpands(owner) &&
+            dy >= dp(10) && abs(dy) > abs(dx) * 1.15f
+
+    private fun openMainPillOwnerAfterDownSwipe(owner: String?) {
+        if (owner != "notifications" || showingNotif || callActive || stopwatchStart > 0L || liveActivityIsShowing()) return
+        val waiting = notificationQueue.values.lastOrNull() ?: pending ?: return
+        mediaNotificationKey = waiting.key
+        openMediaNotification()
+    }
+
+    private fun onPillTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> animatePress(0.94f)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> animatePress(1f)
+        }
+        // Expand as soon as a deliberate downward drag is recognized, and let the same
+        // still-held gesture reverse back to collapsed if the finger returns upward.
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                expandSwipeDownX = e.rawX
+                expandSwipeDownY = e.rawY
+                expandGestureActivityId = activityWinner()
+                tapGestureOwnerId = expandGestureActivityId
+                tapGestureOwnerCaptured = true
+                expandingBySwipe = false
+                expandSwipeCaptured = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dy = e.rawY - expandSwipeDownY
+                val dx = e.rawX - expandSwipeDownX
+                val returnedUp = dy <= dp(3)
+                val gestureOwner = mainPillSwipeOwner()
+                if (shouldCapturePillDownSwipe(dx, dy, gestureOwner)) {
+                    expandingBySwipe = true
+                    expandSwipeCaptured = true
+                    openMainPillOwnerAfterDownSwipe(gestureOwner)
+                    handler.removeCallbacks(collapse)
+                    if (!expanded) setExpanded(true)
+                    if (showingNotif) armNotifTimer()
+                    val cancel = MotionEvent.obtain(e)
+                    cancel.action = MotionEvent.ACTION_CANCEL
+                    gestures.onTouchEvent(cancel)
+                    cancel.recycle()
+                    return true
+                } else if (expandingBySwipe && expanded && returnedUp) {
+                    expandingBySwipe = false
+                    setExpanded(false)
+                    return true
+                } else if (expandSwipeCaptured) {
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (expandSwipeCaptured) {
+                    tapGestureOwnerCaptured = false
+                    tapGestureOwnerId = null
+                    expandingBySwipe = false
+                    expandSwipeCaptured = false
+                    expandGestureActivityId = null
+                    interceptingPillDownSwipe = false
+                    expandSwipeDelegatedToChild = false
+                    return true
+                }
+            }
+        }
+        // Horizontal swipes browse expanded notifications; only calls can be swiped away.
         if (swipeTarget() || swiping) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -1674,6 +2953,9 @@ class CapsuleService : NotificationListenerService() {
                     swipeDownY = e.rawY
                     swipeBaseX = lp.x
                     swiping = false
+                    alphaSpringActive = false
+                    springAlpha.snapTo(1f)
+                    pill?.alpha = 1f
                     swipeTracker?.recycle()
                     swipeTracker = android.view.VelocityTracker.obtain().also { it.addMovement(e) }
                 }
@@ -1684,9 +2966,7 @@ class CapsuleService : NotificationListenerService() {
                     if (!swiping && abs(dx) > dp(12) && abs(dx) > abs(dy) * 1.5f) {
                         swiping = true
                         handler.removeCallbacks(collapse)   // no auto-collapse while the finger is down
-                        pill?.animate()?.cancel()
-                        pill?.scaleX = 1f
-                        pill?.scaleY = 1f
+                        animatePress(1f)
                         // stop the tap and long-press detection for this touch
                         val cancel = MotionEvent.obtain(e)
                         cancel.action = MotionEvent.ACTION_CANCEL
@@ -1722,11 +3002,77 @@ class CapsuleService : NotificationListenerService() {
             }
             return false
         }
-        return gestures.onTouchEvent(e)
+        if (e.actionMasked == MotionEvent.ACTION_CANCEL) {
+            tapGestureOwnerCaptured = false
+            tapGestureOwnerId = null
+        }
+        val handled = gestures.onTouchEvent(e)
+        if (e.actionMasked == MotionEvent.ACTION_UP ||
+            (e.actionMasked == MotionEvent.ACTION_CANCEL && !interceptingPillDownSwipe)) {
+            expandGestureActivityId = null
+            expandSwipeDelegatedToChild = false
+        }
+        if (e.actionMasked == MotionEvent.ACTION_UP) interceptingPillDownSwipe = false
+        return handled
     }
 
-    // What a sideways swipe can dismiss right now: a notification, or the open call pill
-    private fun swipeTarget() = (showingNotif && notifKey != null) || (callActive && expanded)
+    /** Notification text is clipped to its compact layout; horizontal drags dismiss it. */
+    private fun onNotificationBodyTouch(event: MotionEvent): Boolean {
+        val canHandle = mainPillNotificationSwipeTarget() && !shouldShowActivityNotificationCard() &&
+            !(lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true))
+        if (!canHandle) {
+            notificationBodyHorizontalSwipe = false
+            return false
+        }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                notificationBodyDownX = event.rawX
+                notificationBodyDownY = event.rawY
+                swipeBaseX = lp.x
+                notificationBodyHorizontalSwipe = false
+                return false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.rawX - notificationBodyDownX
+                val dy = event.rawY - notificationBodyDownY
+                if (!notificationBodyHorizontalSwipe && abs(dx) >= dp(14) && abs(dx) > abs(dy) * 1.25f) {
+                    notificationBodyHorizontalSwipe = true
+                }
+                if (notificationBodyHorizontalSwipe) dragPill(dx)
+                return notificationBodyHorizontalSwipe
+            }
+            MotionEvent.ACTION_UP -> {
+                if (!notificationBodyHorizontalSwipe) return false
+                val dx = event.rawX - notificationBodyDownX
+                val elapsedMs = (event.eventTime - event.downTime).coerceAtLeast(1L)
+                val velocityX = dx * 1000f / elapsedMs
+                notificationBodyHorizontalSwipe = false
+                finishSwipe(dx, velocityX)
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                val wasHorizontal = notificationBodyHorizontalSwipe
+                notificationBodyHorizontalSwipe = false
+                if (wasHorizontal) finishSwipe(0f, 0f)
+                return wasHorizontal
+            }
+        }
+        return notificationBodyHorizontalSwipe
+    }
+
+    // The main pill owns the notification only when it is actually showing that notification.
+    // A queued item alongside media, Maps, or charging is dismissed through its own companion pill.
+    private fun mainPillNotificationSwipeTarget(): Boolean {
+        if (callActive || qsActive() || widgetActive()) return false
+        return if (expanded) {
+            notifKey != null && activityWinner() in setOf("live", "notifications")
+        } else {
+            shouldShowCollapsedNotificationPreview()
+        }
+    }
+
+    // This also covers title/icon regions outside the notification text body.
+    private fun swipeTarget() = mainPillNotificationSwipeTarget() || (callActive && expanded)
 
     // The whole pill window follows the finger, so it can slide right off the screen
     private fun dragPill(dx: Float) {
@@ -1738,7 +3084,54 @@ class CapsuleService : NotificationListenerService() {
 
     private fun finishSwipe(dx: Float, vx: Float) {
         val r = root ?: return
-        val far = abs(dx) > dp(90) || (abs(vx) > dp(500) && vx * dx > 0)
+        val notificationSwipe = mainPillNotificationSwipeTarget()
+        val far = if (notificationSwipe) {
+            abs(dx) >= dp(36) || abs(vx) >= dp(350)
+        } else {
+            abs(dx) > dp(90) || (abs(vx) > dp(500) && vx * dx > 0)
+        }
+        if (notificationSwipe) {
+            val direction = if (abs(dx) > dp(1)) dx else vx
+            if (far && abs(direction) > 0f) {
+                if (!motionEnabled()) {
+                    dismissSwiped()
+                    lp.x = swipeBaseX
+                    runCatching { wm.updateViewLayout(r, lp) }
+                    pill?.alpha = 1f
+                    pill?.scaleX = 1f
+                    pill?.scaleY = 1f
+                    return
+                }
+                val target = (if (direction > 0f) 1f else -1f) * resources.displayMetrics.widthPixels.toFloat()
+                springX.snapTo(lp.x.toFloat())
+                springX.retarget(target)
+                springX.setVelocity(vx.coerceIn(-dp(1200).toFloat(), dp(1200).toFloat()))
+                swipeSpringActive = true
+                swipeDismissPending = true
+                postSpringFrame()
+                return
+            }
+            if (!motionEnabled()) {
+                lp.x = swipeBaseX
+                runCatching { wm.updateViewLayout(r, lp) }
+                pill?.alpha = 1f
+                pill?.scaleX = 1f
+                pill?.scaleY = 1f
+                if (showingNotif) armNotifTimer()
+                return
+            }
+            val releaseVelocity = vx.coerceIn(-dp(1200).toFloat(), dp(1200).toFloat())
+            springX.snapTo(lp.x.toFloat())
+            springAlpha.snapTo(pill?.alpha ?: 1f)
+            springAlpha.retarget(1f)
+            alphaSpringActive = true
+            springX.retarget(swipeBaseX.toFloat())
+            springX.setVelocity(releaseVelocity)
+            swipeSpringActive = true
+            swipeReturnPending = true
+            postSpringFrame()
+            return
+        }
         if (!motionEnabled()) {
             // Complete swipe handling synchronously for reduced-motion users; don't leave the
             // overlay partially transparent or off-screen while an animator is disabled.
@@ -1752,55 +3145,64 @@ class CapsuleService : NotificationListenerService() {
             if (!far && showingNotif) armNotifTimer()
             return
         }
+        val velocityLimit = dp(1200).toFloat()
+        val releaseVelocity = vx.coerceIn(-velocityLimit, velocityLimit)
+        springX.snapTo(lp.x.toFloat())
+        springAlpha.snapTo(pill?.alpha ?: 1f)
+        springAlpha.retarget(1f)
+        alphaSpringActive = true
         if (!far) {
-            // Not far enough: spring back
-            ValueAnimator.ofFloat(dx, 0f).apply {
-                duration = 220
-                interpolator = easeOut
-                addUpdateListener { dragPill(it.animatedValue as Float) }
-                addListener(object : android.animation.AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: android.animation.Animator) {
-                        pill?.alpha = 1f
-                        if (showingNotif) armNotifTimer()
-                    }
-                })
-                start()
-            }
+            springX.retarget(swipeBaseX.toFloat())
+            springX.setVelocity(releaseVelocity)
+            swipeSpringActive = true
+            swipeReturnPending = true
+            postSpringFrame()
             return
         }
         val target = (if (dx > 0) 1 else -1) * resources.displayMetrics.widthPixels.toFloat()
-        ValueAnimator.ofFloat(dx, target).apply {
-            duration = 180
-            interpolator = android.view.animation.AccelerateInterpolator()
-            addUpdateListener { dragPill(it.animatedValue as Float) }
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    dismissSwiped()
-                    // The pill is smaller now: put it back in its place and fade it in
-                    lp.x = swipeBaseX
-                    runCatching { wm.updateViewLayout(r, lp) }
-                    pill?.alpha = 0f
-                    pill?.animate()?.alpha(1f)?.setDuration(220)?.start()
-                }
-            })
-            start()
-        }
+        springX.retarget(target)
+        springX.setVelocity(releaseVelocity)
+        swipeSpringActive = true
+        swipeDismissPending = true
+        postSpringFrame()
     }
 
     private fun dismissSwiped() {
-        if (showingNotif && notifKey != null) {
-            if (notificationQueue.size > 1) {
-                browseQueuedNotification(1)
-                return
-            }
-            removeQueuedNotification(notifKey)
-            cancelNotification(notifKey)
-            handler.removeCallbacks(collapse)
-            collapse.run()
-        } else if (callActive) {
+        if (mainPillNotificationSwipeTarget()) {
+            if (expanded) dismissExpandedNotification()
+            else dismissMediaNotification(notificationQueue.values.lastOrNull()?.key ?: notifKey)
+            return
+        }
+        if (callActive) {
             callDismissed = true
             handler.removeCallbacks(collapse)
             collapse.run()
+        }
+    }
+
+    private fun dismissExpandedNotification() {
+        val key = notifKey ?: return
+        removeQueuedNotification(key)
+        runCatching { cancelNotification(key) }
+        mediaNotificationExpanded = false
+        val next = notificationQueue.values.lastOrNull()
+        mediaNotificationKey = next?.key
+        if (next != null) {
+            presentNotif(next, 2)
+            focusNotifications()
+            if (!expanded) setExpanded(true) else applyVisibility()
+            armNotifTimer()
+        } else {
+            showingNotif = false
+            notifIntent = null
+            notifKey = null
+            notifLevel = 0
+            replyAction = null
+            notifActions = emptyList()
+            userFocusedNotification = false
+            handler.removeCallbacks(collapse)
+            setExpanded(false)
+            applyVisibility()
         }
     }
 
@@ -1839,9 +3241,15 @@ class CapsuleService : NotificationListenerService() {
                 }
             }
             "open_codes" -> launch(Intent(this, CodeActivity::class.java))
+            "open_tasks" -> {
+                handler.removeCallbacks(collapse)
+                setExpanded(false)
+                startActivity(Intent(this, MainActivity::class.java)
+                    .putExtra("cat", "tasks")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
             "clock" -> showClock()
-            "control_panel" -> togglePanel()
-            "quick_settings" -> togglePanel()   // old saved gesture: now opens the control panel
+            "open_pinned", "control_panel", "quick_settings" -> togglePanel()
         }
     }
 
@@ -1849,11 +3257,28 @@ class CapsuleService : NotificationListenerService() {
 
     // True when the expanded pill should show the charging layout (same rule as the old charging text)
     private fun chargeExpandedShown() =
-        charging && showCharging() && activityWinner() == "charging"
+        charging && showCharging() && (activityWinner() == "charging" || shouldShowChargingWithNotification())
 
     private fun updateChargeBox() {
         val ma = chargeMa
         val w = chargeWatts
+        val textScale = prefs.getInt("sectionTextScale_charging", 100).coerceIn(80, 160) / 100f
+        val iconScale = prefs.getInt("sectionIconScale_charging", 100).coerceIn(70, 160) / 100f
+        val expandedRingDp = (prefs.getInt("chargeRingSize", 48).coerceIn(36, 80) * iconScale).toInt().coerceIn(32, 96)
+        (chargeRing.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
+            params.width = dp(expandedRingDp)
+            params.height = dp(expandedRingDp)
+            chargeRing.layoutParams = params
+        }
+        chargeMetricIcons.forEach { metric ->
+            (metric.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
+                val iconDp = (15 * iconScale).toInt().coerceIn(12, 24)
+                params.width = dp(iconDp)
+                params.height = dp(iconDp)
+                metric.layoutParams = params
+            }
+        }
+        (chargeTop + chargeBottom).forEach { it.textSize = 12.5f * textScale }
         if (::chargeMetricIcons.isInitialized) chargeMetricIcons.forEach { it.invalidate() }
         // Compact, consistent glyphs make each charging metric scannable without
         // adding extra rows that would make the floating pill taller.
@@ -1885,11 +3310,20 @@ class CapsuleService : NotificationListenerService() {
 
     private fun togglePlay() {
         val c = controller ?: return
-        if (c.playbackState?.state == PlaybackState.STATE_PLAYING) {
-            c.transportControls.pause()
-        } else {
-            c.transportControls.play()
+        val state = c.playbackState
+        val playing = state?.state == PlaybackState.STATE_PLAYING
+        val pauseSupported = state?.actions?.and(PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE) != 0L
+        val playSupported = state?.actions?.and(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PLAY_PAUSE) != 0L
+        if (playing && !pauseSupported || !playing && !playSupported) {
+            diag("media toggle unavailable: active session does not advertise ${if (playing) "pause" else "play"}")
+            return
         }
+        runCatching {
+            if (playing) c.transportControls.pause() else c.transportControls.play()
+        }.onSuccess {
+            haptic()
+            handler.postDelayed({ refreshMedia() }, 180L)
+        }.onFailure { error -> diag("media toggle failed: ${error.javaClass.simpleName}") }
     }
 
     private fun seekBy(deltaMs: Long) {
@@ -1937,7 +3371,7 @@ class CapsuleService : NotificationListenerService() {
     // App notifications use their own timer: it can be switched off, and its length is a setting
     private fun armNotifTimer() {
         handler.removeCallbacks(collapse)
-        if (shouldShowMediaWithNotification()) return
+        if (shouldShowActivityNotificationCard()) return
         if (!callKeepsOpen() && prefs.getBoolean("notifAutoCollapse", true)) {
             handler.postDelayed(collapse, prefs.getInt("notifSeconds", 4) * 1000L)
         }
@@ -1965,6 +3399,7 @@ class CapsuleService : NotificationListenerService() {
         notificationQueue.remove(p.key)
         notificationQueue[p.key] = p
         mediaNotificationKey = p.key
+        mediaNotificationExpanded = false
         while (notificationQueue.size > maxQueuedNotifications) {
             val oldest = notificationQueue.keys.firstOrNull() ?: break
             notificationQueue.remove(oldest)
@@ -1989,10 +3424,168 @@ class CapsuleService : NotificationListenerService() {
         if (!::notificationBadge.isInitialized) return
         val total = notificationQueue.size + notificationOverflow
         notificationBadge.text = if (notificationOverflow > 0) "20+" else total.toString()
-        notificationBadge.contentDescription = "$total unread notifications"
+        notificationBadgeTarget.contentDescription = "$total unread notifications. Tap to open the latest notification"
         notificationBadge.visibility = vis(total > 0)
         if (::mediaNotificationCard.isInitialized) renderMediaNotificationCard()
+        if (::notificationBubble.isInitialized) updateNotificationBubble(presentationState())
         updateLockscreenNotificationSummary(total)
+    }
+
+    private fun notificationBadgeSizeDp(): Int =
+        CapsulePrefs.notificationBadgeSize(prefs.getInt("notificationBadgeSize", CapsulePrefs.notificationBadgeSizeDefault))
+
+    private fun notificationBadgeFillColor(): Int =
+        CapsulePrefs.notificationBadgeColor(
+            prefs.getString("notificationBadgeColor", "theme"),
+            notificationQueueStyle().accent
+        )
+
+    private fun notificationBadgeTextColor(): Int =
+        CapsulePrefs.notificationBadgeTextColor(notificationBadgeFillColor())
+
+    private fun applyNotificationBadgeAppearance() {
+        if (!::notificationBadge.isInitialized) return
+        val badgeSize = notificationBadgeSizeDp()
+        val fillColor = notificationBadgeFillColor()
+        notificationBadge.textSize = badgeSize * 0.46f
+        notificationBadge.minWidth = dp(badgeSize)
+        notificationBadge.minHeight = dp(badgeSize)
+        val horizontalPadding = dp((badgeSize / 8).coerceAtLeast(2))
+        notificationBadge.setPadding(horizontalPadding, 0, horizontalPadding, 0)
+        notificationBadge.setTextColor(CapsulePrefs.notificationBadgeTextColor(fillColor))
+        notificationBadge.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(fillColor)
+        }
+        notificationBadge.requestLayout()
+    }
+
+    private fun notificationBadgeGravity(corner: String): Int = when (corner) {
+        "top_start" -> Gravity.TOP or Gravity.LEFT
+        "bottom_start" -> Gravity.BOTTOM or Gravity.LEFT
+        "bottom_end" -> Gravity.BOTTOM or Gravity.RIGHT
+        "right_side" -> Gravity.CENTER_VERTICAL or Gravity.RIGHT
+        else -> Gravity.TOP or Gravity.RIGHT
+    }
+
+    private fun notificationBadgeContentGravity(corner: String): Int =
+        if (corner == "right_side") Gravity.CENTER_VERTICAL or Gravity.LEFT else notificationBadgeGravity(corner)
+
+    private fun sideBadgeSlot(): Int =
+        if (prefs.getString("notificationBadgeCorner", "top_end") == "right_side") dp(56) else 0
+
+    private fun activityBubbleBadgeReserve(): Int {
+        if (notificationBubbleSlotActive || (notificationQueue.isEmpty() && notificationOverflow == 0)) return 0
+        val corner = prefs.getString("notificationBadgeCorner", "top_end")
+        return if (corner == "top_end" || corner == "bottom_end") dp(48) else 0
+    }
+
+    /** Keep the side bubble and a right-corner queue badge in separate hit regions. */
+    private fun activityBubbleSlot(): Int =
+        if (activityBubbleSlotActive) dp(80) + activityBubbleBadgeReserve() else 0
+
+    private fun notificationBubbleSlot(): Int =
+        if (notificationBubbleSlotActive) dp(112) else 0
+
+    private fun overlayRightSlots(includeActivityBubble: Boolean = !expanded): Int =
+        sideBadgeSlot() + if (includeActivityBubble) activityBubbleSlot() else 0
+
+    private fun overlayLeftSlots(includeNotificationBubble: Boolean = !expanded): Int =
+        if (includeNotificationBubble) notificationBubbleSlot() else 0
+
+    private fun overlaySideSlots(
+        includeActivityBubble: Boolean = !expanded,
+        includeNotificationBubble: Boolean = !expanded
+    ): Int = overlayRightSlots(includeActivityBubble) + overlayLeftSlots(includeNotificationBubble)
+
+    private fun shouldShowActivityBubble(state: CapsulePresentationState = presentationState()): Boolean {
+        if (!prefs.getBoolean("splitActivityOn", false) || expanded || callActive ||
+            stopwatchStart > 0L || qsActive() || widgetActive() ||
+            (lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true))) return false
+        val secondary = state.secondary ?: return false
+        return secondary.id != suppressedActivityBubbleKey
+    }
+
+    /** A queued notification gets its own left-side pill; it never becomes a card under media/Maps/charging. */
+    private fun shouldShowNotificationBubble(state: CapsulePresentationState = presentationState()): Boolean {
+        if (expanded || callActive || stopwatchStart > 0L || qsActive() || widgetActive() ||
+            (lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true)) || notificationQueue.isEmpty()) return false
+        return state.notificationHost != null && state.foreground !in setOf(
+            CapsuleActivityKind.CALL, CapsuleActivityKind.STOPWATCH, CapsuleActivityKind.LIVE,
+            CapsuleActivityKind.NOTIFICATION
+        )
+    }
+
+    private fun setNotificationBadgeCorner(corner: String) {
+        if (!::notificationBadgeTarget.isInitialized || !::notificationBadge.isInitialized) return
+        val targetGravity = notificationBadgeGravity(corner)
+        val contentGravity = notificationBadgeContentGravity(corner)
+        val targetParams = notificationBadgeTarget.layoutParams as? FrameLayout.LayoutParams ?: return
+        val badgeParams = notificationBadge.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (targetParams.gravity == targetGravity && badgeParams.gravity == contentGravity) return
+        targetParams.gravity = targetGravity
+        targetParams.setMargins(0, 0, 0, 0)
+        if (corner == "right_side") targetParams.rightMargin = touchPad()
+        notificationBadgeTarget.layoutParams = targetParams
+        badgeParams.gravity = contentGravity
+        badgeParams.setMargins(0, 0, 0, 0)
+        when (corner) {
+            "top_start" -> { badgeParams.topMargin = dp(1); badgeParams.leftMargin = dp(1) }
+            "bottom_start" -> { badgeParams.bottomMargin = dp(1); badgeParams.leftMargin = dp(1) }
+            "bottom_end" -> { badgeParams.bottomMargin = dp(1); badgeParams.rightMargin = dp(1) }
+            "right_side" -> { badgeParams.leftMargin = dp(1); badgeParams.rightMargin = dp(1) }
+            else -> { badgeParams.topMargin = dp(1); badgeParams.rightMargin = dp(1) }
+        }
+        notificationBadge.layoutParams = badgeParams
+    }
+
+    /** Keep the preferred corner when clear; otherwise move the badge away from visible controls. */
+    private fun avoidNotificationBadgeOverlap() {
+        if (!::notificationBadgeTarget.isInitialized || notificationBadge.visibility != View.VISIBLE) return
+        val container = root ?: return
+        val size = dp(44)
+        if (container.width < size || container.height < size) return
+        val rootLocation = IntArray(2)
+        container.getLocationOnScreen(rootLocation)
+        val importantViews = buildList {
+            addAll(listOf(icon, title, subtitle, miniText, miniRight, miniChargeRing))
+            addAll(listOf(btnPrev, btnBack10, btnPlay, btnForward10, btnNext, btnAnswer, btnDecline))
+            addAll(listOf(progress, elapsedText, remainText, navTurn, navStreet, navEta, navArrive, navLeft))
+            addAll(listOf(mediaNotificationTitle, mediaNotificationBody, mediaNotificationPosition))
+            addAll(listOf(notificationPrevious, notificationPosition, notificationNext))
+            addAll(chargeTop)
+            addAll(chargeBottom)
+        }.filter { it.visibility == View.VISIBLE && it.width > 0 && it.height > 0 }
+        val protectedRects = importantViews.map { view ->
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            intArrayOf(
+                location[0] - rootLocation[0], location[1] - rootLocation[1],
+                location[0] - rootLocation[0] + view.width, location[1] - rootLocation[1] + view.height
+            )
+        }
+        val preferred = prefs.getString("notificationBadgeCorner", "top_end")
+            ?.takeIf { it in setOf("top_start", "top_end", "bottom_start", "bottom_end", "right_side") } ?: "top_end"
+        val candidates = listOf(preferred, "top_start", "top_end", "bottom_start", "bottom_end").distinct()
+        fun overlapArea(corner: String): Long {
+            val left = when {
+                corner == "right_side" -> container.width - touchPad() - size
+                corner.endsWith("start") -> 0
+                else -> container.width - size
+            }
+            val top = when {
+                corner == "right_side" -> (container.height - size) / 2
+                corner.startsWith("top") -> 0
+                else -> container.height - size
+            }
+            return protectedRects.sumOf { rect ->
+                val w = (minOf(left + size, rect[2]) - maxOf(left, rect[0])).coerceAtLeast(0)
+                val h = (minOf(top + size, rect[3]) - maxOf(top, rect[1])).coerceAtLeast(0)
+                w.toLong() * h
+            }
+        }
+        val bestCorner = candidates.minByOrNull(::overlapArea) ?: preferred
+        setNotificationBadgeCorner(bestCorner)
     }
 
     private fun currentMediaNotification(): PendingNotif? {
@@ -2010,13 +3603,29 @@ class CapsuleService : NotificationListenerService() {
         val item = currentMediaNotification()
         if (item == null) {
             mediaNotificationCard.visibility = View.GONE
+            mediaNotificationActionsRow.visibility = View.GONE
+            mediaNotificationExpanded = false
             return
         }
-        val items = notificationQueue.values.toList()
         mediaNotificationTitle.text = item.title
         mediaNotificationBody.text = item.body.ifBlank { appLabel(item.pkg) }
-        val index = items.indexOfFirst { it.key == item.key }.let { if (it >= 0) it + 1 else items.size }
-        mediaNotificationPosition.text = if (items.size > 1) "$index of ${items.size} · swipe to browse" else "1 of 1"
+        mediaNotificationBody.maxLines = if (mediaNotificationExpanded) 4 else 1
+        val actionCount = item.actions.size.coerceAtMost(mediaNotificationActionButtons.size)
+        mediaNotificationPosition.text = if (actionCount > 0) "Latest notification · actions below" else "Latest notification"
+        mediaNotificationContent.contentDescription = when {
+            mediaNotificationExpanded && actionCount > 0 -> "Latest notification details expanded. $actionCount actions available."
+            mediaNotificationExpanded -> "Latest notification details expanded."
+            actionCount > 0 -> "Latest notification preview. Tap to show actions."
+            else -> "Latest notification preview. Tap to expand."
+        }
+        mediaNotificationActionButtons.forEachIndexed { actionIndex, button ->
+            val action = item.actions.getOrNull(actionIndex)
+            button.text = action?.title?.toString().orEmpty()
+            button.contentDescription = action?.title?.toString()?.let { "Notification action: $it" }
+                ?: "Unavailable notification action"
+            button.visibility = vis(mediaNotificationExpanded && action != null)
+        }
+        mediaNotificationActionsRow.visibility = vis(mediaNotificationExpanded && actionCount > 0)
         if (mediaNotificationRenderedKey != item.key) {
             mediaNotificationIcon.setImageDrawable(appIcon(item.pkg))
             mediaNotificationRenderedKey = item.key
@@ -2026,14 +3635,93 @@ class CapsuleService : NotificationListenerService() {
         mediaNotificationTitle.setTextColor(queueStyle.primary)
         mediaNotificationBody.setTextColor(queueStyle.secondary)
         mediaNotificationPosition.setTextColor(queueStyle.secondary)
-        mediaNotificationDismiss.setTextColor(queueStyle.primary)
-        mediaNotificationDismiss.background = notificationQueueControlBackground()
         // This renderer also runs when the badge count changes. Never let that refresh
         // resurrect the expanded card while the pill is collapsed or privacy-masked.
-        val visible = shouldShowMediaWithNotification() &&
-            !(lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true)) &&
-            !qsActive() && !widgetActive()
-        mediaNotificationCard.visibility = vis(visible)
+        mediaNotificationCard.visibility = View.GONE
+    }
+
+    /** Keep the selected notification card, but make the rest of the queue visible underneath it. */
+    private fun renderNotificationQueueStack(activityHost: Boolean) {
+        if (!::notificationQueueStack.isInitialized) return
+        val items = notificationQueue.values.toList()
+        val selectedKey = if (activityHost) mediaNotificationKey else notifKey
+        val remaining = items.filterNot { it.key == selectedKey }.asReversed()
+        notificationQueueStackRows.removeAllViews()
+        if (remaining.isEmpty()) {
+            notificationQueueStack.visibility = View.GONE
+            return
+        }
+        val style = notificationQueueStyle()
+        remaining.forEach { item ->
+            val entry = LinearLayout(uiCtx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(5), dp(6), dp(5))
+                background = notificationQueueSurface()
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4) }
+                isClickable = true
+                isFocusable = true
+                contentDescription = "${item.title}. ${item.body}. Select notification."
+            }
+            val copy = LinearLayout(uiCtx).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                addView(TextView(uiCtx).apply {
+                    text = item.title.ifBlank { appLabel(item.pkg) }
+                    setTextColor(style.primary)
+                    textSize = 12f
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                })
+                addView(TextView(uiCtx).apply {
+                    text = item.body.ifBlank { appLabel(item.pkg) }
+                    setTextColor(style.secondary)
+                    textSize = 10f
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                })
+            }
+            entry.addView(copy)
+            entry.addView(TextView(uiCtx).apply {
+                text = "×"
+                contentDescription = "Dismiss ${item.title}"
+                setTextColor(style.secondary)
+                textSize = 18f
+                gravity = Gravity.CENTER
+                minWidth = dp(44)
+                minHeight = dp(44)
+                setOnClickListener {
+                    val selected = if (activityHost) mediaNotificationKey else notifKey
+                    removeQueuedNotification(item.key)
+                    runCatching { cancelNotification(item.key) }
+                    if (selected == item.key) {
+                        if (activityHost) mediaNotificationKey = notificationQueue.values.lastOrNull()?.key
+                        else notificationQueue.values.lastOrNull()?.let { presentNotif(it, 2) }
+                        mediaNotificationExpanded = false
+                    }
+                    applyVisibility()
+                }
+            })
+            entry.setOnClickListener {
+                handler.removeCallbacks(collapse)
+                if (activityHost) {
+                    mediaNotificationKey = item.key
+                    mediaNotificationExpanded = false
+                    renderMediaNotificationCard()
+                    applyVisibility()
+                } else {
+                    focusNotifications()
+                    presentNotif(item, 2)
+                    if (!expanded) setExpanded(true) else applyVisibility()
+                    armNotifTimer()
+                }
+                haptic()
+            }
+            notificationQueueStackRows.addView(entry)
+        }
+        notificationQueueStack.visibility = View.VISIBLE
     }
 
     private fun browseMediaNotification(delta: Int) {
@@ -2043,18 +3731,43 @@ class CapsuleService : NotificationListenerService() {
         val current = if (index >= 0) index else items.lastIndex
         val next = items[(current + delta).coerceIn(0, items.lastIndex)]
         mediaNotificationKey = next.key
+        mediaNotificationExpanded = false
         haptic()
         renderMediaNotificationCard()
     }
 
-    private fun openMediaNotification() {
-        val item = currentMediaNotification() ?: return
-        runCatching { item.intent?.send() }
+    private fun toggleMediaNotificationDetails() {
+        if (currentMediaNotification() == null) return
+        mediaNotificationExpanded = !mediaNotificationExpanded
+        haptic()
+        renderMediaNotificationCard()
+        applyVisibility()
     }
 
-    private fun dismissMediaNotification() {
+    private fun runMediaNotificationAction(index: Int) {
+        val action = currentMediaNotification()?.actions?.getOrNull(index) ?: return
+        runCatching { action.actionIntent.send() }
+        haptic()
+        mediaNotificationExpanded = false
+        renderMediaNotificationCard()
+        applyVisibility()
+    }
+
+    private fun openMediaNotification() {
         val item = currentMediaNotification() ?: return
+        mediaNotificationKey = item.key
+        handler.removeCallbacks(collapse)
+        mediaNotificationExpanded = false
+        focusNotifications()
+        presentNotif(item, 2)
+        setExpanded(true)
+        armNotifTimer()
+    }
+
+    private fun dismissMediaNotification(key: String? = null) {
+        val item = (if (key == null) currentMediaNotification() else notificationQueue[key]) ?: return
         removeQueuedNotification(item.key)
+        mediaNotificationExpanded = false
         runCatching { cancelNotification(item.key) }
         val next = notificationQueue.values.lastOrNull()
         mediaNotificationKey = next?.key
@@ -2101,8 +3814,8 @@ class CapsuleService : NotificationListenerService() {
         val start = if (current >= 0) current else items.lastIndex
         val next = items[(start + delta).coerceIn(0, items.lastIndex)]
         handler.removeCallbacks(collapse)
-        userFocusedNotification = true
-        presentNotif(next, 1)
+        focusNotifications()
+        presentNotif(next, 2)
         if (!expanded) setExpanded(true) else applyVisibility()
         refreshNotificationBadge()
         armNotifTimer()
@@ -2141,14 +3854,30 @@ class CapsuleService : NotificationListenerService() {
             applyVisibility()
             return
         }
+        if (!e) {
+            mediaNotificationExpanded = false
+            // Returning from a companion activity always restores the scheduler's stable main owner.
+            focusedActivityId = null
+        }
         val style = pillAnimationStyle()
         val flight = style == "continuity" && motionEnabled() && prepareChargeIconFlight(e)
         val artFlight = style == "continuity" && motionEnabled() &&
             activityWinner() == "media" && !lockScreenActive() && prepareMediaArtFlight()
         if (flight && e) chargeBox.alpha = 0f
-        if (style != "settling_dock") snapshotOld() else clearSnapshot()
+        // Keep a visual copy of the expanded contents over the shrinking surface so
+        // controls and details don't disappear before the collapse motion finishes.
+        snapshotOld(collapse = !e)
         expanded = e
-        applyVisibility()
+        syncOverlayRowInsets()
+        val priorCompanionDirection = companionMotionExpansionOverride
+        // Side pills do the complementary part of the same transition: as the main
+        // pill opens they fold toward it; as it closes they unfold from its edge.
+        companionMotionExpansionOverride = !e
+        try {
+            applyVisibility()
+        } finally {
+            companionMotionExpansionOverride = priorCompanionDirection
+        }
         staggerIn()
         animateSize()
         if (flight) startChargeIconFlight(e)
@@ -2424,7 +4153,7 @@ class CapsuleService : NotificationListenerService() {
 
     private fun pillAnimationStyle(): String =
         (prefs.getString("pillAnimationStyle", "continuity") ?: "continuity").let {
-            if (it == "liquid_morph" || it == "continuity" || it == "settling_dock") it else "continuity"
+            if (it in setOf("liquid_morph", "continuity", "settling_dock", "capsule_spring")) it else "continuity"
         }
 
     // Respect the legacy animation switch, reduced motion, and Android's system animator setting.
@@ -2554,77 +4283,155 @@ class CapsuleService : NotificationListenerService() {
 
     // Expanded height depends on what the pill is showing: grid, music, notification or call, or charging
     private fun targetInnerH(): Int {
-        if (lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true)) return miniH
+        if (lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true)) return collapsedTargetHeight()
         // Collapsed notification state is represented only by the count badge. Never let the
         // queued notification's text/action height keep the compact pill expanded vertically.
-        if (!expanded) return miniH
-        if (showingNotif && !callActive && !shouldShowMediaWithNotification()) {
-            val body = subtitle.text?.toString().orEmpty()
-            val widthDp = (expW / resources.displayMetrics.density).toInt().coerceAtLeast(180)
-            val charsPerLine = ((widthDp - 76) / 6.2f).toInt().coerceIn(18, 48)
-            val lines = body.split('\n').sumOf { line ->
-                maxOf(1, (line.length + charsPerLine - 1) / charsPerLine)
-            }.coerceIn(1, 15)
-            val textHeight = dp(20 + lines * 17)
-            val actionHeight = if (notifLevel >= 2 && (replyAction != null || notifActions.isNotEmpty())) dp(44) else 0
-            val desired = maxOf(dp(64), textHeight + dp(34) + actionHeight)
-            val available = (resources.displayMetrics.heightPixels - lp.y - dp(48)).coerceAtLeast(dp(100))
-            return minOf(desired, available)
+        if (!expanded) return collapsedTargetHeight()
+        val notificationWinner = activityWinner()
+        if (!callActive && !qsActive() && !widgetActive() &&
+            (showingNotif || notificationWinner == "notifications") &&
+            notificationWinner in setOf("live", "notifications") &&
+            !shouldShowActivityNotificationCard()) {
+            val defaultMaximum = 220
+            val available = (resources.displayMetrics.heightPixels - lp.y - dp(48)).coerceAtLeast(dp(64))
+            val configuredMaximum = if (prefs.getBoolean("customSize_notifications", false)) {
+                customSizePx("notifications", "ExpandedHeight", dp(defaultMaximum), dp(64), available)
+            } else {
+                dp(prefs.getInt("expH_notif", defaultMaximum)).coerceIn(dp(64), available)
+            }
+            return notificationPanelContentHeight(configuredMaximum).coerceAtMost(available)
         }
         if (qsActive()) {
             val rows = (CapsulePrefs.qsItems.size + pinnedPackages().size + QS_COLS - 1) / QS_COLS
             return rows * dp(46) + dp(16)
         }
         if (widgetActive()) return dp(prefs.getInt("imageHeight", 120))
+        if (idleTasksPreviewVisible()) {
+            val tasks = CapsuleTaskStore.filtered(
+                prefs,
+                prefs.getString("taskPreviewList", CapsuleTaskStore.ALL_LISTS) ?: CapsuleTaskStore.ALL_LISTS
+            )
+            val count = minOf(tasks.size, prefs.getInt("taskPreviewLimit", 3).coerceIn(1, 8))
+            val desired = dp(82 + count * 36)
+            val available = (resources.displayMetrics.heightPixels - lp.y - dp(48)).coerceAtLeast(dp(100))
+            val screenFitHeight = desired.coerceAtMost(available)
+            return customSizePx("tasks", "ExpandedHeight", screenFitHeight, screenFitHeight, available)
+        }
         val key = when {
             callActive -> "expH_notif"
             shouldShowMediaWithNotification() -> "expH_music"
-            showingNotif && notifLevel >= 2 && (replyAction != null || notifActions.isNotEmpty()) -> "expH_stack"
+            shouldShowChargingWithNotification() -> "expH_charge"
+            shouldShowNavigationWithNotification() -> "expH_nav"
             showingNotif -> "expH_notif"
             mapsShown() -> "expH_nav"
             controller != null && showMusic() -> "expH_music"
             else -> "expH_charge"
         }
-        val configured = prefs.getInt(key, if (key == "expH_music") 168 else if (key == "expH_nav") 112 else if (key == "expH_stack") 104 else 64)
+        val configured = prefs.getInt(key, if (key == "expH_music") 220 else if (key == "expH_nav") 112 else if (key == "expH_notif") 220 else 64)
         val minimum = when {
             callActive -> 144
             key == "expH_music" -> 168
             else -> 0
         }
-        val combinedMinimum = if (shouldShowMediaWithNotification()) 228 else 0
-        return dp(maxOf(configured, minimum, combinedMinimum))
-    }
-
-    // ---------- spring motion ----------
-    // A damped spring, the way iOS animates the Dynamic Island: it speeds up, overshoots a little, and settles.
-    // stiffness = (2*pi / response)^2, damping = 4*pi * ratio / response (mass 1). Width and height have their own
-    // springs, and a new target keeps the speed it had, so a change in the middle of a move never jerks.
-    private class Spring {
-        var value = 0f
-        var target = 0f
-        var velocity = 0f
-
-        fun step(dt: Float, response: Float, ratio: Float) {
-            val w = (2.0 * Math.PI / response).toFloat()
-            val k = w * w
-            val c = (4.0 * Math.PI * ratio / response).toFloat()
-            var left = dt
-            while (left > 0f) {
-                val h = minOf(left, 1f / 240f)
-                val a = -k * (value - target) - c * velocity
-                velocity += a * h
-                value += velocity * h
-                left -= h
-            }
+        val queueDetailsHeight = if (mediaNotificationExpanded) 80 else 0
+        val queueStackHeight = if (notificationQueue.size > 1) ((notificationQueue.size - 1) * 58 + 6).coerceAtMost(132) else 0
+        val combinedMinimum = when {
+            shouldShowMediaWithNotification() -> 228 + queueDetailsHeight + queueStackHeight
+            shouldShowChargingWithNotification() -> 164 + queueDetailsHeight + queueStackHeight
+            shouldShowNavigationWithNotification() -> 220 + queueDetailsHeight + queueStackHeight
+            else -> 0
         }
-
-        fun settled(eps: Float) = abs(value - target) < eps && abs(velocity) < eps * 8f
+        val floor = dp(maxOf(minimum, combinedMinimum))
+        val desired = dp(maxOf(configured, minimum, combinedMinimum))
+        val available = (resources.displayMetrics.heightPixels - lp.y - dp(48)).coerceAtLeast(floor)
+        return customSizePx(activePillSizingSection(), "ExpandedHeight", desired, floor, available)
     }
 
-    private val springW = Spring()
-    private val springH = Spring()
+    /** Fit short notification text naturally; the user's height value caps longer content. */
+    private fun notificationPanelContentHeight(maximumHeight: Int): Int {
+        if (!::title.isInitialized || !::subtitle.isInitialized) return maximumHeight
+        val iconScale = prefs.getInt("sectionIconScale_notifications", 100).coerceIn(70, 160) / 100f
+        val iconHeight = (dp(40) * iconScale).toInt().coerceIn(dp(24), dp(80))
+        val textWidth = (expandedTargetWidth() - iconHeight - dp(28)).coerceAtLeast(dp(72))
+        val titleHeight = notificationTextHeight(title, textWidth, 1)
+        val bodyLineHeight = notificationTextHeight(subtitle, textWidth, 1).coerceAtLeast(dp(12))
+        val hasActionRow = notifLevel >= 2 && (
+            notifActions.isNotEmpty() ||
+                (replyAction != null && prefs.getBoolean("replyChips", true))
+            )
+        val actionHeight = if (hasActionRow) dp(52) else 0
+        val actionGap = if (hasActionRow) dp(6) else 0
+        val breathingRoom = dp(16)
+        val headerBase = maxOf(iconHeight, titleHeight)
+        val safeMinimum = headerBase + bodyLineHeight + actionHeight + actionGap + breathingRoom
+        val bodyBudget = (maximumHeight - headerBase - actionHeight - actionGap - breathingRoom)
+            .coerceAtLeast(bodyLineHeight)
+        val bodyLines = (bodyBudget / bodyLineHeight).coerceIn(1, 3)
+        subtitle.maxLines = bodyLines
+        subtitle.ellipsize = TextUtils.TruncateAt.END
+        val bodyHeight = notificationTextHeight(subtitle, textWidth, bodyLines)
+        val contentHeight = maxOf(iconHeight, titleHeight + bodyHeight) +
+            actionHeight + actionGap + breathingRoom
+        return maxOf(safeMinimum, contentHeight).coerceAtMost(maxOf(safeMinimum, maximumHeight))
+    }
+
+    private fun notificationTextHeight(view: TextView, width: Int, maxLines: Int): Int {
+        val text = view.text ?: return 0
+        if (text.isEmpty()) return 0
+        return runCatching {
+            StaticLayout.Builder.obtain(text, 0, text.length, view.paint, width.coerceAtLeast(1))
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setIncludePad(view.includeFontPadding)
+                .setLineSpacing(view.lineSpacingExtra, view.lineSpacingMultiplier)
+                .setEllipsize(TextUtils.TruncateAt.END)
+                .setEllipsizedWidth(width.coerceAtLeast(1))
+                .setMaxLines(maxLines.coerceAtLeast(1))
+                .build()
+                .height
+        }.getOrElse { dp(18) * maxLines.coerceAtLeast(1) }
+    }
+
+    // ---------- shared spring motion system ----------
+    // One display-frame callback drives size, corner, press, and swipe channels. Each channel is
+    // analytical and frame-rate independent; retargeting preserves its current velocity.
+    private val springW = CapsuleSpring()
+    private val springH = CapsuleSpring()
+    private val springCorner = CapsuleSpring()
+    private val springX = CapsuleSpring()
+    private val springPressX = CapsuleSpring()
+    private val springPressY = CapsuleSpring()
+    private val springAlpha = CapsuleSpring()
+    private val springBubbleX = CapsuleSpring()
+    private val springBubbleScale = CapsuleSpring()
+    private val springBubbleAlpha = CapsuleSpring()
+    private val notificationSpringX = CapsuleSpring()
+    private val notificationSpringScale = CapsuleSpring()
+    private val notificationSpringAlpha = CapsuleSpring()
     private var springRunning = false
+    private var sizeMotionActive = false
+    private var swipeSpringActive = false
+    private var pressSpringActive = false
+    private var alphaSpringActive = false
+    private var bubbleSpringActive = false
+    private var notificationSpringActive = false
+    private var swipeDismissPending = false
+    private var swipeReturnPending = false
     private var springLast = 0L
+
+    private fun postSpringFrame() {
+        if (springRunning) return
+        springRunning = true
+        springLast = 0L
+        android.view.Choreographer.getInstance().postFrameCallback(springFrame)
+    }
+
+    private fun cornerTarget(height: Int): Float {
+        val pad = touchPad()
+        return minOf(
+            ((height - 2 * pad).coerceAtLeast(0)) / 2f,
+            dp(if (expanded) pillStyle().cornerDp else 40).toFloat()
+        )
+    }
 
     private val springFrame = object : android.view.Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -2633,6 +4440,12 @@ class CapsuleService : NotificationListenerService() {
                 // Do not keep scheduling display-frame callbacks for an overlay that has been removed.
                 // A subsequent animateSize() call will initialise the spring from the current layout.
                 springRunning = false
+                sizeMotionActive = false
+                swipeSpringActive = false
+                pressSpringActive = false
+                alphaSpringActive = false
+                bubbleSpringActive = false
+                notificationSpringActive = false
                 springLast = 0L
                 return
             }
@@ -2640,56 +4453,219 @@ class CapsuleService : NotificationListenerService() {
                 // The system animation scale can change while a spring is already running.
                 // Finish at the latest target immediately instead of continuing to animate.
                 val pad = touchPad()
-                lp.width = (springW.target + 0.5f).toInt().coerceAtLeast(miniW + 2 * pad - dp(4))
-                lp.height = (springH.target + 0.5f).toInt().coerceAtLeast(miniH + 2 * pad - dp(4))
-                springW.value = springW.target
-                springH.value = springH.target
-                springW.velocity = 0f
-                springH.velocity = 0f
-                (pill?.background as? GradientDrawable)?.cornerRadius = minOf(
-                    (lp.height - 2 * pad) / 2f,
-                    dp(if (expanded) pillStyle().cornerDp else 40).toFloat()
+                val sideSlotsBeforeClose = overlaySideSlots()
+                val mainWidthTargetBeforeClose = springW.target
+                lp.width = (springW.target + 0.5f).toInt().coerceAtLeast(
+                    miniW + 2 * pad + overlaySideSlots() - dp(4)
                 )
+                lp.height = (springH.target + 0.5f).toInt().coerceAtLeast(collapsedTargetHeight() + 2 * pad - dp(4))
+                springW.snapTo(springW.target)
+                springH.snapTo(springH.target)
+                springCorner.snapTo(cornerTarget(lp.height))
+                springX.snapTo(springX.target)
+                springPressX.snapTo(1f)
+                springPressY.snapTo(1f)
+                springAlpha.snapTo(1f)
+                lp.x = springX.value.toInt()
+                pill?.scaleX = 1f
+                pill?.scaleY = 1f
+                pill?.alpha = 1f
+                (pill?.background as? GradientDrawable)?.cornerRadius = springCorner.value
                 runCatching { wm.updateViewLayout(r, lp) }
                 syncPanelY()
                 springRunning = false
+                sizeMotionActive = false
+                swipeSpringActive = false
+                pressSpringActive = false
+                alphaSpringActive = false
+                bubbleSpringActive = false
+                activityBubbleHidePending = false
+                if (::activityBubble.isInitialized) {
+                    springBubbleX.snapTo(if (activityBubbleTargetVisible) 0f else -companionOffset())
+                    springBubbleScale.snapTo(if (activityBubbleTargetVisible) 1f else companionHiddenScale())
+                    springBubbleAlpha.snapTo(if (activityBubbleTargetVisible) 1f else 0f)
+                    activityBubble.translationX = springBubbleX.value
+                    activityBubble.scaleX = springBubbleScale.value
+                    activityBubble.scaleY = springBubbleScale.value
+                    activityBubble.alpha = springBubbleAlpha.value
+                    if (!activityBubbleTargetVisible) {
+                        activityBubble.visibility = View.GONE
+                        activityBubbleSlotActive = false
+                        activityBubbleLastSlotWidth = 0
+                    }
+                }
+                notificationSpringActive = false
+                notificationBubbleHidePending = false
+                if (::notificationBubble.isInitialized) {
+                    notificationSpringX.snapTo(if (notificationBubbleTargetVisible) 0f else companionOffset())
+                    notificationSpringScale.snapTo(if (notificationBubbleTargetVisible) 1f else companionHiddenScale())
+                    notificationSpringAlpha.snapTo(if (notificationBubbleTargetVisible) 1f else 0f)
+                    notificationBubble.translationX = notificationSpringX.value
+                    notificationBubble.scaleX = notificationSpringScale.value
+                    notificationBubble.scaleY = notificationSpringScale.value
+                    notificationBubble.alpha = notificationSpringAlpha.value
+                    if (!notificationBubbleTargetVisible) {
+                        notificationBubble.visibility = View.GONE
+                        notificationBubbleSlotActive = false
+                        notificationBubbleLastSlotWidth = 0
+                    }
+                }
+                syncOverlayRowInsets(updateWindow = false)
+                val sideSlotsAfterClose = overlaySideSlots()
+                val sideSlotDelta = sideSlotsAfterClose - sideSlotsBeforeClose
+                val resolvedWidth = (if (expanded) expandedTargetWidth() else compactTargetWidth()) +
+                    2 * pad + overlaySideSlots(includeActivityBubble = !expanded, includeNotificationBubble = !expanded)
+                val finalWidth = if (sideSlotDelta != 0) {
+                    (mainWidthTargetBeforeClose + sideSlotDelta).toInt().coerceAtLeast(
+                        miniW + 2 * pad + sideSlotsAfterClose - dp(4)
+                    )
+                } else resolvedWidth
+                val resolvedHeight = (if (expanded) targetInnerH() else collapsedTargetHeight()) + 2 * pad
+                lp.width = finalWidth
+                lp.height = resolvedHeight
+                springW.snapTo(finalWidth.toFloat())
+                springH.snapTo(resolvedHeight.toFloat())
+                springCorner.snapTo(cornerTarget(resolvedHeight))
+                runCatching { wm.updateViewLayout(r, lp) }
+                syncPanelY()
+                swipeDismissPending = false
+                swipeReturnPending = false
                 springLast = 0L
                 return
             }
             val dt = if (springLast == 0L) 1f / 60f
             else ((frameTimeNanos - springLast) / 1_000_000_000f).coerceIn(0f, 0.05f)
             springLast = frameTimeNanos
-            // Width leads height to create a liquid stretch. Presets tune response time without changing the shape.
             val speed = prefs.getString("springSpeed", "medium") ?: "medium"
-            val (widthResponse, heightResponse, damping) = if (pillAnimationStyle() == "settling_dock") {
-                Triple(0.52f, 0.58f, 0.96f)
-            } else {
-                when (speed) {
-                    "fast" -> Triple(0.31f, 0.38f, 0.84f)
-                    "slow" -> Triple(0.60f, 0.70f, 0.84f)
-                    else -> Triple(0.42f, 0.50f, 0.84f)
+            val profile = CapsuleMotionProfile.from(speed, pillAnimationStyle(), expanded)
+            if (sizeMotionActive) {
+                springW.advance(dt, profile.widthResponse, profile.dampingRatio)
+                springH.advance(dt, profile.heightResponse, profile.dampingRatio)
+                springCorner.advance(dt, 0.36f, profile.dampingRatio)
+                if (springW.isSettled(0.6f, 5f) && springH.isSettled(0.6f, 5f) &&
+                    springCorner.isSettled(0.6f, 5f)) {
+                    springW.snapTo(springW.target)
+                    springH.snapTo(springH.target)
+                    springCorner.snapTo(springCorner.target)
+                    sizeMotionActive = false
                 }
             }
-            springW.step(dt, widthResponse, damping)
-            springH.step(dt, heightResponse, damping)
-            val done = springW.settled(0.6f) && springH.settled(0.6f)
-            if (done) {
-                springW.value = springW.target
-                springH.value = springH.target
-                springW.velocity = 0f
-                springH.velocity = 0f
+            if (swipeSpringActive) {
+                springX.advance(dt, profile.gestureResponse, 0.94f)
+                if (springX.isSettled(0.6f, 6f)) {
+                    springX.snapTo(springX.target)
+                    swipeSpringActive = false
+                    if (swipeReturnPending) {
+                        swipeReturnPending = false
+                        if (showingNotif) armNotifTimer()
+                    }
+                }
+                lp.x = springX.value.toInt()
             }
-            val pad = touchPad()
-            // Never smaller than the camera hole, even in the small bounce at the end of a collapse
-            lp.width = (springW.value + 0.5f).toInt().coerceAtLeast(miniW + 2 * pad - dp(4))
-            lp.height = (springH.value + 0.5f).toInt().coerceAtLeast(miniH + 2 * pad - dp(4))
-            (pill?.background as? GradientDrawable)?.cornerRadius = minOf(
-                (lp.height - 2 * pad) / 2f,
-                dp(if (expanded) pillStyle().cornerDp else 40).toFloat()
-            )
+            if (pressSpringActive) {
+                springPressX.advance(dt, 0.20f, 0.88f)
+                springPressY.advance(dt, 0.20f, 0.88f)
+                if (springPressX.isSettled(0.001f, 0.01f) && springPressY.isSettled(0.001f, 0.01f)) {
+                    springPressX.snapTo(springPressX.target)
+                    springPressY.snapTo(springPressY.target)
+                    pressSpringActive = false
+                }
+                pill?.scaleX = springPressX.value
+                pill?.scaleY = springPressY.value
+            }
+            if (alphaSpringActive) {
+                springAlpha.advance(dt, 0.22f, 1f)
+                if (springAlpha.isSettled(0.002f, 0.02f)) {
+                    springAlpha.snapTo(springAlpha.target)
+                    alphaSpringActive = false
+                }
+                pill?.alpha = springAlpha.value
+            }
+            if (bubbleSpringActive && ::activityBubble.isInitialized) {
+                val bubbleProfile = companionMotionProfile(activityBubbleMotionExpanding)
+                val bubbleDamping = companionDamping(bubbleProfile)
+                springBubbleX.advance(dt, bubbleProfile.widthResponse, bubbleDamping)
+                springBubbleScale.advance(dt, bubbleProfile.widthResponse, bubbleDamping)
+                springBubbleAlpha.advance(dt, bubbleProfile.widthResponse * 0.78f, 1f)
+                activityBubble.translationX = springBubbleX.value
+                activityBubble.scaleX = springBubbleScale.value
+                activityBubble.scaleY = springBubbleScale.value
+                activityBubble.alpha = springBubbleAlpha.value
+                if (springBubbleX.isSettled(0.45f, 5f) &&
+                    springBubbleScale.isSettled(0.004f, 0.02f) &&
+                    springBubbleAlpha.isSettled(0.004f, 0.02f)) {
+                    springBubbleX.snapTo(springBubbleX.target)
+                    springBubbleScale.snapTo(springBubbleScale.target)
+                    springBubbleAlpha.snapTo(springBubbleAlpha.target)
+                    activityBubble.translationX = springBubbleX.value
+                    activityBubble.scaleX = springBubbleScale.value
+                    activityBubble.scaleY = springBubbleScale.value
+                    activityBubble.alpha = springBubbleAlpha.value
+                    bubbleSpringActive = false
+                    if (activityBubbleHidePending) {
+                        activityBubbleHidePending = false
+                        val previousSideSlots = overlaySideSlots()
+                        activityBubble.visibility = View.GONE
+                        activityBubbleSlotActive = false
+                        activityBubbleLastSlotWidth = 0
+                        releaseCompanionSlotWithoutMainMotion(previousSideSlots)
+                    }
+                }
+            }
+            if (notificationSpringActive && ::notificationBubble.isInitialized) {
+                val bubbleProfile = companionMotionProfile(notificationBubbleMotionExpanding)
+                val bubbleDamping = companionDamping(bubbleProfile)
+                notificationSpringX.advance(dt, bubbleProfile.widthResponse, bubbleDamping)
+                notificationSpringScale.advance(dt, bubbleProfile.widthResponse, bubbleDamping)
+                notificationSpringAlpha.advance(dt, bubbleProfile.widthResponse * 0.78f, 1f)
+                notificationBubble.translationX = notificationSpringX.value
+                notificationBubble.scaleX = notificationSpringScale.value
+                notificationBubble.scaleY = notificationSpringScale.value
+                notificationBubble.alpha = notificationSpringAlpha.value
+                if (notificationSpringX.isSettled(0.45f, 5f) &&
+                    notificationSpringScale.isSettled(0.004f, 0.02f) &&
+                    notificationSpringAlpha.isSettled(0.004f, 0.02f)) {
+                    notificationSpringX.snapTo(notificationSpringX.target)
+                    notificationSpringScale.snapTo(notificationSpringScale.target)
+                    notificationSpringAlpha.snapTo(notificationSpringAlpha.target)
+                    notificationBubble.translationX = notificationSpringX.value
+                    notificationBubble.scaleX = notificationSpringScale.value
+                    notificationBubble.scaleY = notificationSpringScale.value
+                    notificationBubble.alpha = notificationSpringAlpha.value
+                    notificationSpringActive = false
+                    if (notificationBubbleHidePending) {
+                        notificationBubbleHidePending = false
+                        val previousSideSlots = overlaySideSlots()
+                        notificationBubble.visibility = View.GONE
+                        notificationBubbleSlotActive = false
+                        notificationBubbleLastSlotWidth = 0
+                        releaseCompanionSlotWithoutMainMotion(previousSideSlots)
+                    }
+                }
+            }
+            if (sizeMotionActive) {
+                val pad = touchPad()
+                // Never smaller than the camera hole, even in the small bounce at the end of a collapse.
+                lp.width = (springW.value + 0.5f).toInt().coerceAtLeast(miniW + 2 * pad + overlaySideSlots() - dp(4))
+                lp.height = (springH.value + 0.5f).toInt().coerceAtLeast(collapsedTargetHeight() + 2 * pad - dp(4))
+                (pill?.background as? GradientDrawable)?.cornerRadius = springCorner.value
+            }
             if (r.isAttachedToWindow) runCatching { wm.updateViewLayout(r, lp) }
-            syncPanelY()
-            if (done) {
+            if (sizeMotionActive) syncPanelY()
+            val finishDismiss = swipeDismissPending && !swipeSpringActive
+            if (finishDismiss) {
+                swipeDismissPending = false
+                dismissSwiped()
+                lp.x = swipeBaseX
+                springX.snapTo(lp.x.toFloat())
+                runCatching { wm.updateViewLayout(r, lp) }
+                springAlpha.snapTo(0f)
+                springAlpha.retarget(1f)
+                alphaSpringActive = motionEnabled()
+                if (!alphaSpringActive) pill?.alpha = 1f
+            }
+            if (!sizeMotionActive && !swipeSpringActive && !pressSpringActive &&
+                !alphaSpringActive && !bubbleSpringActive && !notificationSpringActive) {
                 springRunning = false
                 springLast = 0L
             } else {
@@ -2701,41 +4677,216 @@ class CapsuleService : NotificationListenerService() {
     private fun stopSpring() {
         android.view.Choreographer.getInstance().removeFrameCallback(springFrame)
         springRunning = false
+        sizeMotionActive = false
+        swipeSpringActive = false
+        pressSpringActive = false
+        alphaSpringActive = false
+        bubbleSpringActive = false
+        notificationSpringActive = false
+        activityBubbleHidePending = false
+        notificationBubbleHidePending = false
+        swipeDismissPending = false
+        swipeReturnPending = false
         springLast = 0L
     }
 
     private fun animateSize() {
         val r = root ?: return
         val pad = touchPad()
-        val toW = (if (expanded) expW else if (mapsShown() || callCompact()) dp(240) else miniW) + 2 * pad
-        val toH = (if (expanded) targetInnerH() else miniH) + 2 * pad
+        val toW = (if (expanded) expandedTargetWidth() else compactTargetWidth()) + 2 * pad +
+            overlaySideSlots(includeActivityBubble = !expanded)
+        val toH = (if (expanded) targetInnerH() else collapsedTargetHeight()) + 2 * pad
         if (!motionEnabled()) {
             // Motion disabled in app settings or system settings: jump straight to the new size
             stopSpring()
             lp.width = toW
             lp.height = toH
-            (pill?.background as? GradientDrawable)?.cornerRadius = minOf(
-                (lp.height - 2 * pad) / 2f,
-                dp(if (expanded) pillStyle().cornerDp else 40).toFloat()
-            )
+            springW.snapTo(toW.toFloat())
+            springH.snapTo(toH.toFloat())
+            springCorner.snapTo(cornerTarget(toH))
+            springPressX.snapTo(1f)
+            springPressY.snapTo(1f)
+            springAlpha.snapTo(1f)
+            pill?.scaleX = 1f
+            pill?.scaleY = 1f
+            pill?.alpha = 1f
+            (pill?.background as? GradientDrawable)?.cornerRadius = springCorner.value
             if (r.isAttachedToWindow) runCatching { wm.updateViewLayout(r, lp) }
             syncPanelY()
             return
         }
-        if (!springRunning) {
-            springW.value = lp.width.toFloat()
-            springW.velocity = 0f
-            springH.value = lp.height.toFloat()
-            springH.velocity = 0f
+        if (!sizeMotionActive) {
+            springW.snapTo(lp.width.toFloat())
+            springH.snapTo(lp.height.toFloat())
+            springCorner.snapTo((pill?.background as? GradientDrawable)?.cornerRadius ?: cornerTarget(lp.height))
         }
-        springW.target = toW.toFloat()
-        springH.target = toH.toFloat()
-        if (!springRunning) {
-            springRunning = true
-            springLast = 0L
-            android.view.Choreographer.getInstance().postFrameCallback(springFrame)
+        springW.retarget(toW.toFloat())
+        springH.retarget(toH.toFloat())
+        springCorner.retarget(cornerTarget(toH))
+        sizeMotionActive = true
+        postSpringFrame()
+    }
+
+    private fun animatePress(scale: Float) {
+        val surface = pill ?: return
+        if (!motionEnabled()) {
+            stopSpring()
+            springPressX.snapTo(1f)
+            springPressY.snapTo(1f)
+            surface.scaleX = 1f
+            surface.scaleY = 1f
+            return
+        }
+        if (!pressSpringActive) {
+            springPressX.snapTo(surface.scaleX)
+            springPressY.snapTo(surface.scaleY)
+        }
+        springPressX.retarget(scale)
+        springPressY.retarget(scale)
+        pressSpringActive = true
+        postSpringFrame()
+    }
+
+    private fun activePillSizingSection(): String = when {
+        callActive -> "calls"
+        else -> when (activityWinner()) {
+            "media" -> "media"
+            "navigation" -> "maps"
+            "charging" -> "charging"
+            "notifications", "live" -> "notifications"
+            "stopwatch", null -> "tasks"
+            else -> "notifications"
         }
     }
+
+    private fun customSizePx(section: String, dimension: String, fallbackPx: Int, minPx: Int, maxPx: Int): Int {
+        if (!prefs.getBoolean("customSize_$section", false)) return fallbackPx.coerceIn(minPx, maxPx)
+        val fallbackDp = (fallbackPx / resources.displayMetrics.density).toInt()
+        return dp(prefs.getInt("size${dimension}_$section", fallbackDp)).coerceIn(minPx, maxPx)
+    }
+
+    private fun collapsedTargetHeight(): Int {
+        val screenMax = (resources.displayMetrics.heightPixels - dp(48)).coerceAtLeast(dp(40))
+        return customSizePx(activePillSizingSection(), "CollapsedHeight", miniH, dp(28), screenMax)
+    }
+
+    private fun compactTargetWidth(): Int {
+        val screenMax = (resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(96))
+        val chargeCompact = !expanded && !callActive && activityWinner() == "charging" && charging &&
+            showCharging() && !qsActive() && !widgetActive()
+        val minWidth = minOf(dp(104), screenMax)
+        val fallback = when {
+            shouldShowCollapsedNotificationPreview() -> minOf(dp(260), screenMax)
+            chargeCompact -> dp(prefs.getInt("chargeMiniW", 116)).coerceIn(minWidth, minOf(screenMax, dp(280)))
+            mapsShown() || callCompact() -> minOf(dp(240), screenMax)
+            !expanded && controller != null && showMusic() &&
+                mediaCompactActivityActive() ->
+                dp(prefs.getInt("mediaMiniW", 280)).coerceIn(minWidth, minOf(screenMax, dp(420)))
+            else -> miniW
+        }
+        val configured = customSizePx(activePillSizingSection(), "CollapsedWidth", fallback, minWidth, screenMax)
+        val sideBudget = overlaySideSlots(includeActivityBubble = true, includeNotificationBubble = true)
+        val availableForMain = (resources.displayMetrics.widthPixels - 2 * touchPad() - sideBudget)
+            .coerceAtLeast(minWidth)
+        return configured.coerceAtMost(availableForMain)
+    }
+
+    /** Resolve the closed width without depending on the current expanded state. */
+    private fun collapsedReferenceWidth(section: String, screenMax: Int): Int {
+        val minWidth = minOf(dp(104), screenMax)
+        val defaultWidth = when (section) {
+            "media" -> dp(prefs.getInt("mediaMiniW", 280)).coerceIn(minWidth, minOf(screenMax, dp(420)))
+            "charging" -> dp(prefs.getInt("chargeMiniW", 116)).coerceIn(minWidth, minOf(screenMax, dp(280)))
+            "maps", "calls" -> minOf(dp(240), screenMax)
+            "notifications" -> if (notificationQueue.isNotEmpty()) minOf(dp(260), screenMax) else miniW
+            else -> miniW
+        }.coerceIn(minWidth, screenMax)
+        if (!prefs.getBoolean("customSize_$section", false)) return defaultWidth
+        val fallbackDp = (defaultWidth / resources.displayMetrics.density).toInt()
+        return dp(prefs.getInt("sizeCollapsedWidth_$section", fallbackDp)).coerceIn(minWidth, screenMax)
+    }
+
+    /** Expanded media gets a real wide-card width; keep companion/badge space outside its surface. */
+    private fun expandedTargetWidth(): Int {
+        val screenMax = (resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(200))
+        val section = activePillSizingSection()
+        val mediaActive = section == "media" && controller != null && showMusic()
+        val configured = if (mediaActive) dp(prefs.getInt("mediaExpandedW", 380)) else expW
+        val collapsedWidth = collapsedReferenceWidth(section, screenMax)
+        val minUseful = maxOf(dp(180), collapsedWidth + dp(16)).coerceAtMost(screenMax)
+        val fallback = configured.coerceAtMost(screenMax).coerceAtLeast(minOf(minUseful, screenMax))
+        return customSizePx(section, "ExpandedWidth", fallback, minUseful, screenMax)
+    }
+
+    /** The row must stop reserving the collapsed companion-bubble slot after the main pill opens. */
+    private fun syncOverlayRowInsets(updateWindow: Boolean = true) {
+        val row = pill ?: return
+        val params = row.layoutParams as? FrameLayout.LayoutParams ?: return
+        val pad = touchPad()
+        val corner = prefs.getString("notificationBadgeCorner", "top_end")
+        val sideBadgeSpace = if (corner == "right_side") dp(56) else 0
+        val bubbleSpace = if (!expanded) activityBubbleSlot() else 0
+        val notificationSpace = if (!expanded) notificationBubbleSlot() else 0
+        val desired = intArrayOf(pad + notificationSpace, pad, pad + sideBadgeSpace + bubbleSpace, pad)
+        if (params.leftMargin != desired[0] || params.topMargin != desired[1] ||
+            params.rightMargin != desired[2] || params.bottomMargin != desired[3]) {
+            params.setMargins(desired[0], desired[1], desired[2], desired[3])
+            row.layoutParams = params
+            row.requestLayout()
+        }
+        if (::notificationBadgeTarget.isInitialized) {
+            val badgeParams = notificationBadgeTarget.layoutParams as? FrameLayout.LayoutParams
+            if (badgeParams != null) {
+                val badgeEndSpace = when (corner) {
+                    "right_side" -> pad
+                    else -> pad + bubbleSpace
+                }
+                val badgeStartSpace = if (corner == "right_side") sideBadgeSpace else 0
+                val badgeLeftInset = if (corner == "top_start" || corner == "bottom_start") pad + notificationSpace else badgeStartSpace
+                val expectedGravity = notificationBadgeGravity(corner ?: "top_end")
+                val badgeGravity = if (corner == "right_side") Gravity.CENTER_VERTICAL or Gravity.RIGHT else expectedGravity
+                if (badgeParams.gravity != badgeGravity || badgeParams.rightMargin != badgeEndSpace ||
+                    badgeParams.leftMargin != badgeLeftInset) {
+                    badgeParams.gravity = badgeGravity
+                    badgeParams.leftMargin = badgeLeftInset
+                    badgeParams.rightMargin = badgeEndSpace
+                    notificationBadgeTarget.layoutParams = badgeParams
+                }
+            }
+        }
+        if (::lp.isInitialized) {
+            val right = overlayRightSlots(includeActivityBubble = !expanded)
+            val left = overlayLeftSlots(includeNotificationBubble = !expanded)
+            lp.x = resolvedOffX + (right - left) / 2
+            if (updateWindow && root?.isAttachedToWindow == true) runCatching { wm.updateViewLayout(root, lp) }
+        }
+    }
+
+    /** Remove transparent companion space while preserving the main pill's bounds and spring velocity. */
+    private fun releaseCompanionSlotWithoutMainMotion(previousSideSlots: Int) {
+        syncOverlayRowInsets(updateWindow = false)
+        val currentSideSlots = overlaySideSlots()
+        val windowDelta = currentSideSlots - previousSideSlots
+        if (windowDelta != 0 && ::lp.isInitialized) {
+            val minimum = miniW + 2 * touchPad() + currentSideSlots - dp(4)
+            if (sizeMotionActive) {
+                springW.offsetBy(windowDelta.toFloat())
+                lp.width = (springW.value + 0.5f).toInt().coerceAtLeast(minimum)
+            } else {
+                lp.width = (lp.width + windowDelta).coerceAtLeast(minimum)
+                springW.snapTo(lp.width.toFloat())
+            }
+        }
+        root?.takeIf { it.isAttachedToWindow }?.let { runCatching { wm.updateViewLayout(it, lp) } }
+        if (sizeMotionActive) syncPanelY()
+    }
+
+    /** Show a compact notification only when it will not displace Maps, media, charging, calls, or live activities. */
+    private fun shouldShowCollapsedNotificationPreview(): Boolean =
+        !expanded && !callActive && stopwatchStart <= 0L && notificationQueue.isNotEmpty() &&
+            !liveActivityIsShowing() && !(controller != null && showMusic()) && !mapsShown() &&
+            !(charging && showCharging()) && !qsActive() && !widgetActive() &&
+            !(lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true))
 
     // ---------- content change ----------
     private var lastSnapAt = 0L
@@ -2777,13 +4928,11 @@ class CapsuleService : NotificationListenerService() {
 
     // A picture of what the pill shows now (without its black background). The old content blurs, shrinks
     // and fades out on top of the pill while the new content comes in underneath.
-    private fun snapshotOld() {
-        if (pillAnimationStyle() == "settling_dock") {
+    private fun snapshotOld(collapse: Boolean = false) {
+        if (pillAnimationStyle() == "settling_dock" && !collapse) {
             clearSnapshot()
             return
         }
-        if (chargeFlightPending) return
-        if (mediaArtFlightPending) return
         if (android.os.Build.VERSION.SDK_INT < 31) return
         if (!motionEnabled()) {
             // If motion was disabled while a prior snapshot was fading out, remove it immediately.
@@ -2793,7 +4942,7 @@ class CapsuleService : NotificationListenerService() {
         val p = pill ?: run { clearSnapshot(); return }
         val r = root as? FrameLayout ?: return
         val now = SystemClock.uptimeMillis()
-        if (now - lastSnapAt < 80 || p.width <= 0 || p.height <= 0 || !r.isAttachedToWindow) return
+        if ((!collapse && now - lastSnapAt < 80) || p.width <= 0 || p.height <= 0 || !r.isAttachedToWindow) return
         lastSnapAt = now
         runCatching {
             clearSnapshot()
@@ -2807,23 +4956,38 @@ class CapsuleService : NotificationListenerService() {
                 v.draw(canvas)
                 canvas.restore()
             }
+            val anchorCollapseToTop = collapse && prefs.getBoolean("expandFromStatusBar", true)
             val iv = ImageView(uiCtx).apply {
                 setImageBitmap(bmp)
-                layoutParams = FrameLayout.LayoutParams(p.width, p.height, Gravity.CENTER)
+                layoutParams = FrameLayout.LayoutParams(
+                    p.width,
+                    p.height,
+                    if (anchorCollapseToTop) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER
+                ).apply {
+                    if (anchorCollapseToTop) topMargin = touchPad()
+                }
+                pivotX = p.width / 2f
+                pivotY = if (anchorCollapseToTop) 0f else p.height / 2f
             }
             r.addView(iv)
             snapView = iv
             snapBitmap = bmp
+            val transitionDuration = if (collapse) when (prefs.getInt("springPreset", 1)) {
+                0 -> 260L
+                2 -> 440L
+                else -> 340L
+            } else 140L
+            val finalScale = if (collapse) 0.92f else 0.88f
             iv.animate()
                 .alpha(0f)
-                .scaleX(0.88f)
-                .scaleY(0.88f)
-                .setDuration(140)
+                .scaleX(finalScale)
+                .scaleY(if (anchorCollapseToTop) 1f else finalScale)
+                .setDuration(transitionDuration)
                 .setInterpolator(android.view.animation.AccelerateInterpolator(1.1f))
                 .withEndAction { clearSnapshot(iv) }
                 .start()
             snapBlurAnimator = ValueAnimator.ofFloat(0.1f, 8f).apply {
-                duration = 140
+                duration = transitionDuration
                 addUpdateListener {
                     if (snapView !== iv || !iv.isAttachedToWindow) return@addUpdateListener
                     val radius = it.animatedValue as Float
@@ -3056,6 +5220,10 @@ class CapsuleService : NotificationListenerService() {
     }
 
     private fun togglePanel() {
+        if (!prefs.getBoolean("pinnedOn", true)) {
+            diag("pinned apps gesture ignored: feature is disabled")
+            return
+        }
         if (panelOpen) closePanel() else openPanel()
     }
 
@@ -3142,15 +5310,55 @@ class CapsuleService : NotificationListenerService() {
     }
 
     // Charging indicator. The reference ring keeps its bolt still and lets the irregular outline breathe.
+    private inner class MediaWaveformView(ctx: Context) : View(ctx) {
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = pillStyle().primary
+            strokeCap = android.graphics.Paint.Cap.ROUND
+        }
+        private val levels = floatArrayOf(.28f, .58f, .88f, .48f, .72f, .36f, .66f)
+        private var frame = 0
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            super.onDraw(canvas)
+            if (!isShown) return
+            val gap = width / (levels.size * 2f)
+            val barW = gap * .72f
+            val mid = height / 2f
+            paint.color = pillStyle().primary
+            levels.forEachIndexed { i, level ->
+                val animated = (level * (.52f + .48f * kotlin.math.abs(kotlin.math.sin((frame * .19f) + i * .8f)))).coerceAtLeast(.12f)
+                val barH = height * animated
+                val x = gap * (i * 2 + 1)
+                canvas.drawRoundRect(x, mid - barH / 2f, x + barW, mid + barH / 2f, barW, barW, paint)
+            }
+            frame++
+            postInvalidateDelayed(if (controller?.playbackState?.state == PlaybackState.STATE_PLAYING) 75L else 220L)
+        }
+        override fun onVisibilityChanged(changedView: View, visibility: Int) {
+            super.onVisibilityChanged(changedView, visibility)
+            if (visibility == View.VISIBLE) invalidate()
+        }
+    }
+
     private class ChargeRingView(
         ctx: Context,
         private val selectedStyle: () -> Int,
         private val selectedShape: () -> Int = { 0 },
         private val percent: () -> Int = { 50 },
         private val ringTint: () -> Int = { 0xFFFFFFFF.toInt() },
-        private val ringDensity: () -> Int = { 7 },
-        private val ringSpeed: () -> Int = { 5 }
+        private val waveSpacingDp: () -> Int = { 12 },
+        private val ringSpeed: () -> Int = { 5 },
+        private val ringThickness: () -> Int = { 3 },
+        private val waveHeight: () -> Int = { 9 },
+        private val waveSoftness: () -> Int = { 55 },
+        private val innerWaveSpacing: () -> Int = { 28 },
+        private val animationOn: () -> Boolean = { true },
+        private val remainderThickness: () -> Int = { 2 },
+        private val remainderTint: () -> Int = { 0xFF777777.toInt() },
+        private val waveCycleDurationMs: () -> Long = { 6_980L },
+        private val referenceRingSizeDp: () -> Int = { 48 },
+        private val sharedWavePhase: (() -> Float)? = null
     ) : View(ctx) {
+        private val circularWaveRenderer = CircularWaveChargeRenderer(ctx)
         private val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
             strokeCap = android.graphics.Paint.Cap.ROUND
@@ -3174,6 +5382,8 @@ class CapsuleService : NotificationListenerService() {
         private val inner = android.graphics.RectF()
         private val boltPath = android.graphics.Path()
         private var phase = 0f
+        private var completionPulse = 0f
+        private var lastObservedPercent: Int? = null
         private val anim = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
             repeatCount = android.animation.ValueAnimator.INFINITE
             interpolator = android.view.animation.LinearInterpolator()
@@ -3182,16 +5392,62 @@ class CapsuleService : NotificationListenerService() {
                 invalidate()
             }
         }
-        private fun updateRunning() {
-            if (isAttachedToWindow && isShown && windowVisibility == View.VISIBLE) {
-                if (!anim.isStarted) {
-                    anim.duration = (3000L - (ringSpeed().coerceIn(1, 10) - 1) * 250L).coerceIn(750L, 3000L)
-                    anim.start()
+        private val completionAnimator = android.animation.ValueAnimator.ofFloat(0f, Math.PI.toFloat()).apply {
+            duration = 640L
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            addUpdateListener {
+                completionPulse = kotlin.math.sin(it.animatedValue as Float).toFloat()
+                invalidate()
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    completionPulse = 0f
+                    invalidate()
                 }
-            } else anim.cancel()
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    completionPulse = 0f
+                }
+            })
         }
+        private fun updateRunning() {
+            val shape = selectedShape().coerceIn(0, 11)
+            val progressRing = shape == 9 || shape == 11
+            // Circular Wave keeps its charged sweep moving even at 100%, where the
+            // complete active contour becomes a softly rotating full ring.
+            val needsContinuousMotion = animationOn() &&
+                (shape == 11 || percent().coerceIn(0, 100) < 100 || !progressRing)
+            if (needsContinuousMotion && isAttachedToWindow && isShown && windowVisibility == View.VISIBLE) {
+                val speed = ringSpeed().coerceIn(1, 20)
+                val duration = if (shape == 11) {
+                    waveCycleDurationMs().coerceIn(580L, 24_000L)
+                } else {
+                    (4000L - (speed - 1) * 180L).coerceIn(580L, 4000L)
+                }
+                if (!anim.isStarted) {
+                    anim.duration = duration
+                    anim.start()
+                } else if (anim.duration != duration) {
+                    val currentFraction = anim.animatedFraction
+                    anim.duration = duration
+                    anim.currentPlayTime = (currentFraction * duration).toLong()
+                }
+            } else {
+                anim.cancel()
+                if (!animationOn()) {
+                    completionAnimator.cancel()
+                    completionPulse = 0f
+                    phase = 0f
+                }
+            }
+        }
+        fun refreshAnimationState() { updateRunning(); invalidate() }
         override fun onAttachedToWindow() { super.onAttachedToWindow(); updateRunning() }
-        override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
+        override fun onDetachedFromWindow() {
+            anim.cancel()
+            completionAnimator.cancel()
+            completionPulse = 0f
+            super.onDetachedFromWindow()
+        }
         override fun onVisibilityChanged(changedView: View, visibility: Int) { super.onVisibilityChanged(changedView, visibility); updateRunning() }
         override fun onWindowVisibilityChanged(visibility: Int) { super.onWindowVisibilityChanged(visibility); updateRunning() }
         override fun onDraw(canvas: android.graphics.Canvas) {
@@ -3199,6 +5455,9 @@ class CapsuleService : NotificationListenerService() {
             val h = height.toFloat()
             val unit = minOf(w, h)
             if (unit <= 0f) return
+            val currentPercent = percent().coerceIn(0, 100)
+            observeChargeCompletion(currentPercent)
+            updateRunning()
             val bw = unit * 0.62f
             val bh = unit * 0.76f
             val left = (w - bw) / 2f
@@ -3208,11 +5467,18 @@ class CapsuleService : NotificationListenerService() {
             outline.strokeWidth = stroke
             val inset = stroke * 1.8f
             inner.set(left + inset, top + inset, left + bw - inset, top + bh - inset)
-            val shape = selectedShape().coerceIn(0, 9)
+            val shape = selectedShape().coerceIn(0, 11)
+            val animated = animationOn()
             val style = selectedStyle().coerceIn(0, 2)
-            val wave = (0.5 + 0.5 * kotlin.math.sin(phase * Math.PI * 6.0)).toFloat()
-            if (shape == 8 || shape == 9) {
-                drawIrregularRing(canvas, w, h, unit, style, wave, shape == 9)
+            val chargeFraction = percent().coerceIn(0, 100) / 100f
+            val wave = if (animated) (0.5 + 0.5 * kotlin.math.sin(phase * Math.PI * 6.0)).toFloat() else chargeFraction
+            if (shape >= 8) {
+                when (shape) {
+                    9 -> drawCraftedChargeRing(canvas, w, h, unit)
+                    10 -> drawHorologistChargeRing(canvas, w, h, unit)
+                    11 -> drawWaveChargeRing(canvas, w, h, unit)
+                    else -> drawIrregularRing(canvas, w, h, unit, style, wave, false)
+                }
             } else if (shape == 0) {
                 canvas.drawRoundRect(body, unit * 0.13f, unit * 0.13f, outline)
                 val terminal = android.graphics.RectF(left + bw * 0.32f, top - unit * 0.10f, left + bw * 0.68f, top + unit * 0.015f)
@@ -3260,7 +5526,8 @@ class CapsuleService : NotificationListenerService() {
             }
             if (shape == 6) {
                 val dotRadius = unit * 0.055f
-                val litCount = ((phase * 9f).toInt() % 9) + 1
+                val litCount = if (animated) ((phase * 9f).toInt() % 9) + 1
+                    else ((chargeFraction * 9f) + 0.5f).toInt().coerceIn(0, 9)
                 for (row in 0..2) for (col in 0..2) {
                     fill.alpha = if (row * 3 + col < litCount) 255 else 64
                     canvas.drawCircle(w / 2f + (col - 1) * unit * 0.19f,
@@ -3275,15 +5542,15 @@ class CapsuleService : NotificationListenerService() {
                 fill.strokeWidth = outline.strokeWidth
                 fill.strokeCap = android.graphics.Paint.Cap.ROUND
                 canvas.drawArc(w/2f-radius, h/2f-radius, w/2f+radius, h/2f+radius,
-                    -90f, 360f * phase, false, fill)
+                    -90f, 360f * if (animated) phase else chargeFraction, false, fill)
                 fill.style = android.graphics.Paint.Style.FILL
-            } else if (shape != 8 && shape != 9) {
+            } else if (shape in 0..5) {
                 canvas.save()
                 canvas.clipRect(inner)
                 when (style) {
                 0 -> {
                     // Smooth liquid fill.
-                    val level = 0.28f + 0.62f * wave
+                    val level = if (animated) 0.28f + 0.62f * wave else chargeFraction
                     val fillTop = inner.bottom - inner.height() * level
                     canvas.drawRoundRect(inner.left, fillTop, inner.right, inner.bottom, unit * 0.07f, unit * 0.07f, fill)
                 }
@@ -3291,40 +5558,40 @@ class CapsuleService : NotificationListenerService() {
                     // Three clear charge segments light up in sequence.
                     val gap = maxOf(1f, unit * 0.035f)
                     val segmentH = (inner.height() - gap * 2f) / 3f
+                    val litSegments = if (animated) ((phase * 9f).toInt() % 4)
+                        else kotlin.math.ceil(chargeFraction * 3f).toInt()
                     for (i in 0..2) {
                         val segment = android.graphics.RectF(
                             inner.left, inner.bottom - (i + 1) * segmentH - i * gap,
                             inner.right, inner.bottom - i * (segmentH + gap)
                         )
-                        if (i <= ((phase * 9f).toInt() % 4)) {
+                        if (i < litSegments) {
                             canvas.drawRoundRect(segment, unit * 0.04f, unit * 0.04f, fill)
                         }
                     }
                 }
                 else -> {
                     // Gentle pulse mode: a steady base and a breathing bolt.
-                    fill.alpha = (95 + 100 * wave).toInt().coerceIn(0, 255)
-                    canvas.drawRoundRect(inner, unit * 0.07f, unit * 0.07f, fill)
+                    if (animated) {
+                        fill.alpha = (95 + 100 * wave).toInt().coerceIn(0, 255)
+                        canvas.drawRoundRect(inner, unit * 0.07f, unit * 0.07f, fill)
+                    } else {
+                        val fillTop = inner.bottom - inner.height() * chargeFraction
+                        canvas.drawRoundRect(inner.left, fillTop, inner.right, inner.bottom, unit * 0.07f, unit * 0.07f, fill)
+                    }
                     fill.alpha = 255
                 }
                 }
                 canvas.restore()
             }
-            if (shape != 6) {
+            if (shape != 6 && shape != 11) {
                 val u = unit * 0.22f
-                val ringShape = shape == 8 || shape == 9
-                val boltScale = if (ringShape) when (style) {
-                    0 -> 0.98f + 0.04f * wave
-                    1 -> if ((phase * 9f).toInt() % 3 == 0) 1.035f else 1f
-                    else -> 0.94f + 0.08f * wave
-                } else 1f
+                val ringShape = shape >= 8
+                // Keep the bolt visually anchored while the ring's progress highlight moves.
+                val boltScale = 1f
                 if (ringShape) {
                     bolt.color = ringTint()
-                    bolt.alpha = when (style) {
-                        0 -> (225 + 30 * wave).toInt().coerceIn(0, 255)
-                        1 -> if ((phase * 9f).toInt() % 3 == 0) 255 else 210
-                        else -> (205 + 50 * wave).toInt().coerceIn(0, 255)
-                    }
+                    bolt.alpha = 255
                 }
                 canvas.save()
                 canvas.translate(w / 2f, h / 2f)
@@ -3346,15 +5613,41 @@ class CapsuleService : NotificationListenerService() {
             }
         }
 
+        private fun observeChargeCompletion(currentPercent: Int) {
+            val previousPercent = lastObservedPercent
+            lastObservedPercent = currentPercent
+            if (currentPercent < 100) {
+                if (previousPercent == 100) {
+                    completionAnimator.cancel()
+                    completionPulse = 0f
+                }
+                return
+            }
+            if (previousPercent != null && previousPercent < 100 && animationOn() &&
+                isAttachedToWindow && isShown && windowVisibility == View.VISIBLE) {
+                completionAnimator.cancel()
+                completionAnimator.start()
+            }
+        }
+
+        private fun lobeCountFor(unit: Float): Int {
+            val density = resources.displayMetrics.density.coerceAtLeast(0.1f)
+            val radiusDp = unit / density * 0.305f
+            val circumferenceDp = (2f * Math.PI.toFloat()) * radiusDp
+            val spacing = waveSpacingDp().coerceIn(3, 24).toFloat()
+            return (circumferenceDp / spacing + 0.5f).toInt().coerceIn(3, 32)
+        }
+
         private fun drawIrregularRing(canvas: android.graphics.Canvas, w: Float, h: Float, unit: Float, style: Int, wave: Float, crafted: Boolean) {
             val progress = percent().coerceIn(0, 100) / 100f
             val cx = w / 2f
             val cy = h / 2f
             val radius = unit * if (crafted) 0.305f else 0.30f
-            val density = ringDensity().coerceIn(3, 16)
+            val density = lobeCountFor(unit)
             remainingTrack.color = ringTint()
             remainingTrack.alpha = if (crafted) 62 else 48
-            remainingTrack.strokeWidth = maxOf(1.1f, unit * if (crafted) 0.026f else 0.030f)
+            val thickness = ringThickness().coerceIn(2, 10) * resources.displayMetrics.density
+            remainingTrack.strokeWidth = thickness
             val trackRadius = radius - remainingTrack.strokeWidth * 0.7f
             canvas.drawCircle(cx, cy, trackRadius, remainingTrack)
             if (progress <= 0f) return
@@ -3387,7 +5680,7 @@ class CapsuleService : NotificationListenerService() {
                 drawing = true
             }
             outline.color = ringTint()
-            val baseStroke = maxOf(1.2f, unit * if (crafted) 0.038f else 0.042f)
+            val baseStroke = thickness
             outline.strokeWidth = if (style == 2) baseStroke * (0.94f + 0.10f * wave) else baseStroke
             outline.alpha = if (style == 2) (185 + 70 * wave).toInt().coerceIn(0, 255) else 255
             outline.strokeCap = android.graphics.Paint.Cap.ROUND
@@ -3396,9 +5689,214 @@ class CapsuleService : NotificationListenerService() {
             outline.alpha = 255
             outline.color = 0xFFEAF7F0.toInt()
         }
+
+        /**
+         * The reference's scallops are a designed contour, not noise that changes each frame.
+         * Keep the contour fixed while a short highlight travels along the charged portion.
+         */
+        private fun drawCraftedChargeRing(canvas: android.graphics.Canvas, w: Float, h: Float, unit: Float) {
+            val progress = percent().coerceIn(0, 100) / 100f
+            val cx = w / 2f
+            val cy = h / 2f
+            val radius = unit * 0.305f
+            val thickness = ringThickness().coerceIn(2, 10) * resources.displayMetrics.density
+            val scallops = lobeCountFor(unit)
+            val pointsPerScallop = 8
+            val pointCount = scallops * pointsPerScallop
+            val profile = floatArrayOf(0f, 0.28f, 0.70f, 1f, 0.68f, 0.22f, -0.20f, -0.32f)
+            // A fixed, repeating hand-tuned cadence makes neighboring lobes feel related
+            // without making the ring look like a mathematically perfect gear.
+            val lobeWeights = floatArrayOf(0.90f, 1.10f, 0.82f, 1.02f, 1.16f, 0.88f, 1.06f, 0.94f,
+                1.12f, 0.84f, 1.00f, 1.08f, 0.86f, 1.14f, 0.96f, 1.04f)
+            val points = Array(pointCount) { index ->
+                val lobe = index / pointsPerScallop
+                val local = index % pointsPerScallop
+                val weight = lobeWeights[lobe % lobeWeights.size]
+                val radial = radius * (1f + 0.060f * weight * profile[local])
+                val angle = Math.toRadians(-90.0 + index * (360.0 / pointCount))
+                android.graphics.PointF(
+                    cx + kotlin.math.cos(angle).toFloat() * radial,
+                    cy + kotlin.math.sin(angle).toFloat() * radial
+                )
+            }
+
+            val contour = android.graphics.Path().apply {
+                moveTo(points[0].x, points[0].y)
+                for (i in points.indices) {
+                    val p0 = points[(i - 1 + pointCount) % pointCount]
+                    val p1 = points[i]
+                    val p2 = points[(i + 1) % pointCount]
+                    val p3 = points[(i + 2) % pointCount]
+                    // Catmull-Rom converted to cubic Bezier keeps the scallops smooth and joins seamless.
+                    cubicTo(
+                        p1.x + (p2.x - p0.x) / 6f,
+                        p1.y + (p2.y - p0.y) / 6f,
+                        p2.x - (p3.x - p1.x) / 6f,
+                        p2.y - (p3.y - p1.y) / 6f,
+                        p2.x, p2.y
+                    )
+                }
+                close()
+            }
+            val measure = android.graphics.PathMeasure(contour, true)
+            val length = measure.length
+            if (length <= 0f) return
+
+            // The remaining battery is visible as a subdued, equally thick track underneath.
+            remainingTrack.color = ringTint()
+            remainingTrack.alpha = 108
+            remainingTrack.strokeWidth = thickness
+            remainingTrack.strokeCap = android.graphics.Paint.Cap.ROUND
+            remainingTrack.strokeJoin = android.graphics.Paint.Join.ROUND
+            canvas.drawPath(contour, remainingTrack)
+
+            outline.color = ringTint()
+            outline.alpha = 255
+            outline.strokeWidth = thickness * (1f + 0.10f * completionPulse)
+            outline.strokeCap = android.graphics.Paint.Cap.ROUND
+            outline.strokeJoin = android.graphics.Paint.Join.ROUND
+            if (progress > 0f) {
+                val charged = android.graphics.Path()
+                val chargedLength = length * progress
+                if (progress >= 0.999f) charged.set(contour)
+                else measure.getSegment(0f, chargedLength, charged, true)
+                canvas.drawPath(charged, outline)
+
+                // A short traveling glint communicates active charging without warping the icon.
+                if (animationOn() && progress < 0.999f) {
+                    val glintLength = minOf(chargedLength * 0.075f, unit * 0.12f).coerceAtLeast(thickness * 1.4f)
+                    val glintStart = phase * (chargedLength - glintLength).coerceAtLeast(0f)
+                    val glint = android.graphics.Path()
+                    if (glintStart + glintLength <= chargedLength) {
+                        measure.getSegment(glintStart, glintStart + glintLength, glint, true)
+                        outline.alpha = 150
+                        outline.strokeWidth = thickness * 1.22f
+                        canvas.drawPath(glint, outline)
+                    }
+                }
+            }
+            outline.alpha = 255
+            outline.color = 0xFFEAF7F0.toInt()
+        }
+
+        /** Horologist-inspired rotating wavy progress: fixed lobes, rotating charged sweep. */
+        private fun drawHorologistChargeRing(canvas: android.graphics.Canvas, w: Float, h: Float, unit: Float) {
+            drawCircularWave(canvas, w, h, unit, lobes = lobeCountFor(unit).coerceAtLeast(4),
+                rotation = if (animationOn()) phase * 360f else 0f, waveAmount = 0.055f)
+        }
+
+        /** Circular Wave charging ring: fixed wave shape, with motion reserved for progress. */
+        private fun drawWaveChargeRing(canvas: android.graphics.Canvas, w: Float, h: Float, unit: Float) {
+            circularWaveRenderer.draw(
+                canvas = canvas,
+                centerX = w / 2f,
+                centerY = h / 2f,
+                unitPx = unit,
+                percent = percent(),
+                tint = ringTint(),
+                waveSpacingDp = waveSpacingDp(),
+                thicknessDp = ringThickness(),
+                remainderThicknessDp = remainderThickness(),
+                remainderColor = remainderTint(),
+                waveHeightPercent = waveHeight(),
+                innerWaveSpacingPercent = innerWaveSpacing(),
+                edgeSoftnessPercent = waveSoftness(),
+                phase = sharedWavePhase?.invoke()?.coerceIn(0f, 1f) ?: phase,
+                motionEnabled = animationOn(),
+                referenceRingSizeDp = referenceRingSizeDp()
+            )
+        }
+
+        private fun drawCircularWave(
+            canvas: android.graphics.Canvas,
+            w: Float,
+            h: Float,
+            unit: Float,
+            lobes: Int,
+            rotation: Float,
+            waveAmount: Float,
+            softness: Float = 0f
+        ) {
+            val progress = percent().coerceIn(0, 100) / 100f
+            val cx = w / 2f
+            val cy = h / 2f
+            val radius = unit * 0.305f
+            val thickness = ringThickness().coerceIn(2, 10) * resources.displayMetrics.density
+            // The wave geometry stays still. This prevents the icon from looking like it
+            // is wobbling; only the short highlight moves along the charged part.
+            val wavePhase = 0.0
+            val count = 240
+            val contour = android.graphics.Path()
+            for (i in 0..count) {
+                val a = i.toFloat() / count * (Math.PI * 2.0)
+                val baseWave = kotlin.math.sin(lobes * a + wavePhase).toFloat()
+                // Low softness slightly tightens the crests; high softness returns to a
+                // pure sine contour, which has the gentlest and most rounded transitions.
+                val edgeExponent = 0.82f + 0.18f * softness
+                val shapedWave = (if (baseWave < 0f) -1f else 1f) *
+                    Math.pow(kotlin.math.abs(baseWave).toDouble(), edgeExponent.toDouble()).toFloat()
+                val r = radius * (1f + waveAmount * shapedWave)
+                val angle = a + Math.toRadians(rotation.toDouble())
+                val x = cx + kotlin.math.cos(angle).toFloat() * r
+                val y = cy + kotlin.math.sin(angle).toFloat() * r
+                if (i == 0) contour.moveTo(x, y) else contour.lineTo(x, y)
+            }
+            contour.close()
+            val measure = android.graphics.PathMeasure(contour, true)
+            val length = measure.length
+            if (length <= 0f) return
+            remainingTrack.color = ringTint()
+            remainingTrack.alpha = 108
+            remainingTrack.strokeWidth = thickness
+            remainingTrack.strokeCap = android.graphics.Paint.Cap.ROUND
+            remainingTrack.strokeJoin = android.graphics.Paint.Join.ROUND
+            canvas.drawPath(contour, remainingTrack)
+            if (progress <= 0f) return
+            outline.color = ringTint()
+            outline.alpha = 255
+            val isFull = progress >= 0.999f
+            outline.strokeWidth = thickness * (if (isFull) 1f + 0.10f * completionPulse else 1f)
+            outline.strokeCap = android.graphics.Paint.Cap.ROUND
+            outline.strokeJoin = android.graphics.Paint.Join.ROUND
+            val charged = android.graphics.Path()
+            if (progress >= 0.999f) charged.set(contour)
+            else measure.getSegment(0f, length * progress, charged, true)
+            canvas.drawPath(charged, outline)
+            if (animationOn() && !isFull) {
+                val chargedLength = length * progress
+                val glintLength = minOf(chargedLength, maxOf(thickness * 1.35f, unit * 0.10f))
+                val glintTravel = (chargedLength - glintLength).coerceAtLeast(0f)
+                val glintStart = phase * glintTravel
+                val glint = android.graphics.Path()
+                if (glintLength > 0f) {
+                    measure.getSegment(glintStart, glintStart + glintLength, glint, true)
+                    outline.alpha = 165
+                    outline.strokeWidth = thickness * 1.18f
+                    canvas.drawPath(glint, outline)
+                }
+            }
+            outline.alpha = 255
+            outline.color = 0xFFEAF7F0.toInt()
+        }
     }
 
-    // A scroll view that never grows taller than maxH, so a long panel scrolls instead of running off the screen
+    // Notification text is line-limited and ellipsized; only horizontal motion is intercepted here.
+    private class NotificationBodyPanel(ctx: Context) : FrameLayout(ctx) {
+        var horizontalGestureHandler: ((MotionEvent) -> Boolean)? = null
+
+        override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+            // Let the child keep taps while a clearly horizontal gesture dismisses the notification.
+            if (horizontalGestureHandler?.invoke(event) == true) return true
+            return super.onInterceptTouchEvent(event)
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            // Once intercepted, keep tracking through ACTION_UP to finish the swipe.
+            if (horizontalGestureHandler?.invoke(event) == true) return true
+            return super.onTouchEvent(event)
+        }
+    }
+
     private class CappedScroll(ctx: Context, private val maxH: Int) : android.widget.ScrollView(ctx) {
         override fun onMeasure(widthSpec: Int, heightSpec: Int) {
             super.onMeasure(widthSpec, View.MeasureSpec.makeMeasureSpec(maxH, View.MeasureSpec.AT_MOST))
@@ -3565,102 +6063,33 @@ class CapsuleService : NotificationListenerService() {
         }
     }
 
-    private fun panelCols() = prefs.getInt("panelCols", 4).coerceIn(4, 7)
+    private fun pinnedRows() = prefs.getInt("pinnedRows", 2).coerceIn(1, 4)
 
+    private fun panelCols(): Int {
+        val rows = pinnedRows()
+        return ((pinnedPackages().size + rows - 1) / rows).coerceAtLeast(1).coerceAtMost(8)
+    }
+
+    /** The old control center is now a focused pinned-app launcher, opened from the pill. */
     private fun buildPanel(card: LinearLayout) {
-        val accent = pillAccent()
-
-        // Now playing: artwork, title, transport buttons, then the seek bar and times
-        pMusicCard = LinearLayout(uiCtx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 0, 0, dp(10))
+        card.addView(TextView(uiCtx).apply {
+            text = "Pinned apps"
+            setTextColor(pillStyle().primary)
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(2), 0, dp(2), dp(4))
+        })
+        card.addView(TextView(uiCtx).apply {
+            text = "Your selected apps"
+            setTextColor(pillStyle().secondary)
+            textSize = 12f
+            setPadding(dp(2), 0, dp(2), dp(10))
+        })
+        pTiles = GridLayout(uiCtx).apply {
+            columnCount = panelCols()
+            rowCount = pinnedRows()
+            useDefaultMargins = false
         }
-        val top = LinearLayout(uiCtx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        pArt = ImageView(uiCtx).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            clipToOutline = true
-            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(0xFF222222.toInt())
-            }
-            layoutParams = LinearLayout.LayoutParams(dp(56), dp(56))
-        }
-        val texts = LinearLayout(uiCtx).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { marginStart = dp(12); marginEnd = dp(6) }
-        }
-        pTitle = TextView(uiCtx).apply {
-            setTextColor(Color.WHITE); textSize = 16f; isSingleLine = true
-            ellipsize = TextUtils.TruncateAt.END
-        }
-        pArtist = TextView(uiCtx).apply {
-            setTextColor(Color.WHITE); textSize = 13f; alpha = 0.7f; isSingleLine = true
-            ellipsize = TextUtils.TruncateAt.END
-        }
-        texts.addView(pTitle)
-        texts.addView(pArtist)
-        pPlayBtn = panelButton(R.drawable.ic_play, accent) { togglePlay() }
-        top.addView(pArt)
-        top.addView(texts)
-        top.addView(panelButton(R.drawable.ic_prev, accent) { controller?.transportControls?.skipToPrevious() })
-        top.addView(pPlayBtn)
-        top.addView(panelButton(R.drawable.ic_next, accent) { controller?.transportControls?.skipToNext() })
-
-        pMusicSeek = SeekBar(uiCtx).apply {
-            contentDescription = "Track position"
-            max = 1000
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {}
-                override fun onStartTrackingTouch(sb: SeekBar) { panelDraggingMusic = true }
-                override fun onStopTrackingTouch(sb: SeekBar) {
-                    panelDraggingMusic = false
-                    val dur = controller?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-                    if (dur > 0L) {
-                        val target = (sb.progress.coerceIn(0, sb.max).toLong() * dur / sb.max.coerceAtLeast(1).toLong())
-                            .coerceIn(0L, dur)
-                        controller?.transportControls?.seekTo(target)
-                    }
-                }
-            })
-        }
-        val times = LinearLayout(uiCtx).apply { orientation = LinearLayout.HORIZONTAL }
-        pElapsed = TextView(uiCtx).apply { setTextColor(Color.WHITE); textSize = 11f; alpha = 0.7f }
-        pRemain = TextView(uiCtx).apply {
-            setTextColor(Color.WHITE); textSize = 11f; alpha = 0.7f; gravity = Gravity.END
-        }
-        times.addView(pElapsed, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        times.addView(pRemain, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        pMusicCard.addView(top)
-        pMusicCard.addView(pMusicSeek)
-        pMusicCard.addView(times)
-        card.addView(pMusicCard)
-
-        // Volume
-        val sliders = LinearLayout(uiCtx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(4), 0, dp(6))
-        }
-        sliders.addView(TextView(uiCtx).apply { text = "Volume"; setTextColor(Color.WHITE); textSize = 13f })
-        pVol = SeekBar(uiCtx).apply {
-            contentDescription = "Media volume"
-            max = audio().getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
-                    if (fromUser) audio().setStreamVolume(AudioManager.STREAM_MUSIC, p, 0)
-                }
-                override fun onStartTrackingTouch(sb: SeekBar) { panelDraggingVolume = true }
-                override fun onStopTrackingTouch(sb: SeekBar) { panelDraggingVolume = false }
-            })
-        }
-        sliders.addView(pVol)
-        card.addView(sliders)
-
-        pTiles = GridLayout(uiCtx).apply { columnCount = panelCols() }
         card.addView(pTiles)
         buildTiles()
     }
@@ -3752,12 +6181,13 @@ class CapsuleService : NotificationListenerService() {
             val res = tileIconRes(id)
             if (res == null) null else runCatching { uiCtx.getDrawable(res)?.mutate() }.getOrNull()
         }
-        d?.setBounds(0, 0, dp(22), dp(22))
+        val iconSize = prefs.getInt("pinnedIconSize", 32).coerceIn(20, 48)
+        d?.setBounds(0, 0, dp(iconSize), dp(iconSize))
         return d
     }
 
     private fun panelTile(id: String): TextView {
-        val span = 1
+            val span = 1
         return TextView(uiCtx).apply {
             tag = id
             text = tileLabel(id)
@@ -3778,7 +6208,7 @@ class CapsuleService : NotificationListenerService() {
                 GridLayout.spec(GridLayout.UNDEFINED, 1f)
             ).apply {
                 width = 0
-                height = dp(64)
+                height = dp(prefs.getInt("pinnedIconSize", 32).coerceIn(20, 48) + 34)
                 setMargins(dp(4), dp(4), dp(4), dp(4))
             }
             setOnClickListener {
@@ -3795,129 +6225,40 @@ class CapsuleService : NotificationListenerService() {
     private fun buildTiles() {
         pTiles.removeAllViews()
         pTiles.columnCount = panelCols()
-        val conn = CapsulePrefs.connectivity.filter { tileShown(it) }
-        val more = CapsulePrefs.allTileIds().filter { it !in CapsulePrefs.connectivity && tileShown(it) }
         val apps = pinnedPackages().map { "app:$it" }
-        if (conn.isNotEmpty()) {
-            pTiles.addView(panelHeader("Connectivity"))
-            conn.forEach { pTiles.addView(panelTile(it)) }
-        }
-        if (more.isNotEmpty()) {
-            pTiles.addView(panelHeader("More"))
-            more.forEach { pTiles.addView(panelTile(it)) }
-        }
-        if (apps.isNotEmpty()) {
-            pTiles.addView(panelHeader("Apps"))
-            apps.forEach { pTiles.addView(panelTile(it)) }
-        }
+        pTiles.rowCount = pinnedRows()
+        if (apps.isEmpty()) {
+            val empty = TextView(uiCtx).apply {
+                text = "No pinned apps yet. Choose apps in Capsule Lite settings."
+                setTextColor(pillStyle().secondary)
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setPadding(dp(16), dp(18), dp(16), dp(18))
+                layoutParams = GridLayout.LayoutParams(
+                    GridLayout.spec(0, pinnedRows()), GridLayout.spec(0, panelCols(), 1f)
+                ).apply { width = -1 }
+            }
+            pTiles.addView(empty)
+        } else apps.forEach { pTiles.addView(panelTile(it)) }
         refreshPanelTiles()
     }
 
     private fun refreshPanelTiles() {
-        val accent = pillAccent()
-        val rotateOn = runCatching {
-            Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) == 1
-        }.getOrDefault(false)
-        val dndOn = runCatching {
-            getSystemService(NotificationManager::class.java).currentInterruptionFilter !=
-                NotificationManager.INTERRUPTION_FILTER_ALL
-        }.getOrDefault(false)
         for (i in 0 until pTiles.childCount) {
             val v = pTiles.getChildAt(i) as? TextView ?: continue
             val id = v.tag as? String ?: continue
-            when (id) {
-                "clock" -> v.text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
-                "date" -> v.text = java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.getDefault()).format(java.util.Date())
-                "battery" -> v.text = "$chargePct%"
-                "wifi" -> v.text = "Wi-Fi: " + wifiStatus()
-                "bluetooth" -> v.text = "Bluetooth: " + bluetoothStatus()
+            if (id.startsWith("app:")) {
+                v.setTextColor(pillStyle().primary)
+                (v.background as? GradientDrawable)?.apply {
+                    setColor(pillStyle().control)
+                    setStroke(dp(1), pillStyle().outline)
+                }
             }
-            val on = when (id) {
-                "torch" -> torchOn
-                "rotate" -> rotateOn
-                "dnd" -> dndOn
-                else -> false
-            }
-            (v.background as GradientDrawable).setColor(if (on) accent else 0x33FFFFFF)
-            v.setTextColor(if (on) Color.BLACK else Color.WHITE)
-            // The icon follows the label colour (pinned apps keep their own colours)
-            if (!id.startsWith("app:")) v.compoundDrawablesRelative[1]?.setTint(if (on) Color.BLACK else Color.WHITE)
         }
     }
 
     private fun refreshPanel() {
         if (!panelOpen) return
-        val c = controller
-        val playing = c != null && showMusic()
-        pMusicCard.visibility = vis(playing)
-        if (playing && c != null) {
-            val md = c.metadata
-            val trackTitle = md?.getString(MediaMetadata.METADATA_KEY_TITLE)
-                ?.takeIf { it.isNotBlank() } ?: "Unknown track"
-            val trackArtist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
-            // The panel refreshes twice a second; avoid needless text/layout/accessibility updates.
-            if (pTitle.text.toString() != trackTitle) pTitle.text = trackTitle
-            if (pArtist.text.toString() != trackArtist) pArtist.text = trackArtist
-            val artworkDescription = "Album artwork for $trackTitle"
-            if (pArt.contentDescription?.toString() != artworkDescription) {
-                pArt.contentDescription = artworkDescription
-            }
-            val art = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
-            val artworkToken = buildString {
-                append(c.packageName).append('|')
-                append(md?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID).orEmpty()).append('|')
-                append(md?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()).append('|')
-                append(md?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()).append('|')
-                append(md?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty()).append('|')
-                append(if (art == null) "app-icon" else "${art.width}x${art.height}")
-            }
-            if (panelArtworkToken != artworkToken) {
-                if (art != null) pArt.setImageBitmap(art)
-                else pArt.setImageDrawable(appIcon(c.packageName))
-                panelArtworkToken = artworkToken
-            }
-            val dur = md?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-            // Seeking is only meaningful when the session reports a usable duration.
-            pMusicSeek.isEnabled = dur > 0L
-            val seekDescription = if (dur > 0L) {
-                "Track position, $trackTitle"
-            } else {
-                "Track position unavailable for this track"
-            }
-            if (pMusicSeek.contentDescription?.toString() != seekDescription) {
-                pMusicSeek.contentDescription = seekDescription
-            }
-            val st = c.playbackState
-            var pos = estimatedPlaybackPosition(st)
-            val isPlaying = st?.state == PlaybackState.STATE_PLAYING
-            if (panelWasPlaying != isPlaying) {
-                pPlayBtn.setImageResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play)
-                panelWasPlaying = isPlaying
-            }
-            val playDescription = if (isPlaying) "Pause playback" else "Resume playback"
-            if (pPlayBtn.contentDescription?.toString() != playDescription) {
-                pPlayBtn.contentDescription = playDescription
-            }
-            if (!panelDraggingMusic) {
-                if (dur > 0) {
-                    pos = pos.coerceIn(0L, dur)
-                    val targetProgress = ((pos.toDouble() / dur.toDouble()) * 1000.0)
-                    .toInt().coerceIn(0, 1000)
-                    if (pMusicSeek.progress != targetProgress) pMusicSeek.progress = targetProgress
-                    val remainingText = "-" + fmt(dur - pos)
-                    if (pRemain.text.toString() != remainingText) pRemain.text = remainingText
-                } else {
-                    // Do not leave the previous track's seek position visible when duration is unknown.
-                    if (pMusicSeek.progress != 0) pMusicSeek.progress = 0
-                    if (pRemain.text.isNotEmpty()) pRemain.text = ""
-                }
-                val elapsedText = fmt(pos)
-                if (pElapsed.text.toString() != elapsedText) pElapsed.text = elapsedText
-            }
-        }
-
-        if (!panelDraggingVolume) pVol.progress = audio().getStreamVolume(AudioManager.STREAM_MUSIC)
         refreshPanelTiles()
     }
 
@@ -4005,21 +6346,67 @@ class CapsuleService : NotificationListenerService() {
 
     // ---------- what the pill shows ----------
 
+    private fun collapsedMediaIndicator(): String {
+        val stored = prefs.getString("collapsedMediaIndicator", null)
+        return stored?.takeIf { it in setOf("off", "waveform", "visualizer", "art_pulse") }
+            ?: if (prefs.getBoolean("miniMediaWaveform", true)) "waveform" else "off"
+    }
+
+    private var albumArtPulseAnimator: ValueAnimator? = null
+
+    private fun updateAlbumArtPulse(shouldPulse: Boolean) {
+        if (!::icon.isInitialized) return
+        if (!shouldPulse || !motionEnabled()) {
+            albumArtPulseAnimator?.cancel()
+            albumArtPulseAnimator = null
+            icon.scaleX = 1f
+            icon.scaleY = 1f
+            icon.alpha = 1f
+            return
+        }
+        if (albumArtPulseAnimator?.isStarted == true) return
+        albumArtPulseAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1100L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            addUpdateListener { animator ->
+                val pulse = animator.animatedValue as Float
+                icon.scaleX = 1f + 0.035f * pulse
+                icon.scaleY = 1f + 0.035f * pulse
+                icon.alpha = 0.96f + 0.04f * pulse
+            }
+            start()
+        }
+    }
+
     private fun showCharging() = prefs.getBoolean("showCharging", true)
     private fun showMusic() = prefs.getBoolean("showMusic", true)
+    private fun mapsUsesDirectionCard(): Boolean =
+        prefs.getString("mapsExpandedLayout", null)?.let { it == "direction_card" }
+            ?: prefs.getBoolean("mapsReferenceLayout", true)
 
     private fun shouldShowMediaWithNotification(): Boolean {
-        val winner = activityWinner()
-        return expanded && !callActive && controller != null && showMusic() &&
-            notificationQueue.isNotEmpty() && !liveActivityIsShowing() &&
-            winner in setOf("media", "notifications")
+        return false
     }
+
+    private fun canKeepQueueBesideActivity(): Boolean {
+        return false
+    }
+
+    private fun shouldShowChargingWithNotification(): Boolean =
+        false
+
+    private fun shouldShowNavigationWithNotification(): Boolean =
+        false
+
+    private fun shouldShowActivityNotificationCard(): Boolean =
+        false
 
     private fun vis(on: Boolean) = if (on) View.VISIBLE else View.GONE
 
     private fun publishNotificationQueueStatus(
         winner: String?,
-        mediaWithNotification: Boolean,
+        activityWithNotification: Boolean,
         notifOn: Boolean,
         lockPrivate: Boolean,
         hidden: Boolean
@@ -4029,9 +6416,10 @@ class CapsuleService : NotificationListenerService() {
             count == 0 -> "Queue empty. New notifications appear here."
             lockPrivate -> "$count waiting · hidden by lock-screen privacy."
             hidden -> "$count waiting · temporarily hidden while a widget or quick settings is active."
-            mediaWithNotification -> "$count waiting · browse notifications below media controls in the expanded pill."
+            activityWithNotification -> "$count waiting · browse below the active media, navigation, or charging content in the expanded pill."
             notifOn -> "$count queued · notification details are open in the pill. Swipe or use the queue controls to browse."
-            !expanded -> "$count waiting · compact pill shows the count; expand the pill to browse."
+            !expanded && shouldShowCollapsedNotificationPreview() -> "$count waiting · latest notification preview is in the compact pill; tap the text to open it."
+            !expanded -> "$count waiting · current activity stays visible; tap the count badge to open notifications."
             winner == "navigation" -> "$count waiting · navigation has priority; notifications are available when navigation yields."
             winner == "charging" -> "$count waiting · charging has priority; notifications are available when charging yields."
             winner == "media" -> "$count waiting · media has priority; expand media to see notifications beneath its controls."
@@ -4042,8 +6430,15 @@ class CapsuleService : NotificationListenerService() {
         }
     }
 
+    /** Resolves the current Capsule event and renders its compact or expanded content. */
     private fun applyVisibility() {
         if (pill == null) return
+        root?.visibility = View.VISIBLE
+        if (::lp.isInitialized && root?.isAttachedToWindow == true &&
+            lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0) {
+            lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            runCatching { wm.updateViewLayout(root, lp) }
+        }
         pill?.gravity = if (expanded && prefs.getBoolean("expandFromStatusBar", true)) {
             Gravity.TOP or Gravity.START
         } else {
@@ -4052,30 +6447,73 @@ class CapsuleService : NotificationListenerService() {
         refreshMediaControlStyle()
         val lockPrivate = lockScreenActive() && prefs.getBoolean("lockScreenPrivacy", true)
         val qsOn = qsActive()
+        val presentation = presentationState()
+        val winner = presentation.foreground?.id
+        val queueIsForeground = winner == "notifications" && notificationQueue.isNotEmpty()
+        if (queueIsForeground && !showingNotif) {
+            val queued = notificationQueue.values.lastOrNull()
+            queued?.let { item ->
+                notifKey = item.key
+                mediaNotificationKey = item.key
+                notifIntent = item.intent
+                replyAction = item.reply
+                notifActions = item.actions
+                notifLevel = if (expanded) 2 else 1
+                title.text = item.title.ifBlank { appLabel(item.pkg) }
+                subtitle.text = item.body.ifBlank { appLabel(item.pkg) }
+                icon.setImageDrawable(appIcon(item.pkg))
+            }
+        }
         val inner = targetInnerH()
         val mapsWide = !expanded && (mapsShown() || callCompact())
+        val chargeCompact = !expanded && !callActive && activityWinner() == "charging" && charging &&
+            showCharging() && !qsOn && !widgetActive()
+        val notificationCompact = shouldShowCollapsedNotificationPreview() && !lockPrivate
         var contentChanged = false
-        if (qsOn != lastQs || inner != lastInner || mapsWide != lastMapsWide) {
+        if (qsOn != lastQs || inner != lastInner || mapsWide != lastMapsWide ||
+            chargeCompact != lastChargeMini || notificationCompact != lastNotificationMini) {
             snapshotOld()
             lastQs = qsOn
             lastInner = inner
             lastMapsWide = mapsWide
+            lastChargeMini = chargeCompact
+            lastNotificationMini = notificationCompact
             contentChanged = true
             animateSize()
         }
         val widgetOn = !qsOn && widgetActive()
         val hideAll = qsOn || widgetOn
-        val playing = controller != null && showMusic()
-        val winner = activityWinner()
+        val mediaSessionAvailable = controller != null && showMusic()
+        val mediaPlaying = mediaIsPlaying()
+        val pausedSessionCanResume = mediaSessionCanResume()
+        updateActivityBubble(presentation)
+        updateNotificationBubble(presentation)
         val mediaWithNotification = !hideAll && shouldShowMediaWithNotification()
+        val chargeWithNotification = !hideAll && shouldShowChargingWithNotification()
+        val navigationWithNotification = !hideAll && shouldShowNavigationWithNotification()
+        val activityWithNotification = mediaWithNotification || chargeWithNotification || navigationWithNotification
         if (mediaWithNotification) renderMedia()
         // Notification details belong to an expanded surface. In compact mode, keep only the
         // count badge; rendering title/actions there competes with the charging/media indicators.
-        val notifOn = !hideAll && expanded && showingNotif && winner in setOf("live", "notifications") && !mediaWithNotification
-        publishNotificationQueueStatus(winner, mediaWithNotification, notifOn, lockPrivate, hideAll)
-        val musicOn = !hideAll && expanded && !callActive && playing &&
-            (winner == "media" || mediaWithNotification)
-        val miniMusic = !hideAll && !expanded && !callActive && winner == "media" && playing
+        val notifOn = !hideAll && expanded && (showingNotif || queueIsForeground) &&
+            winner in setOf("live", "notifications") && !activityWithNotification
+        publishNotificationQueueStatus(winner, activityWithNotification, notifOn, lockPrivate, hideAll)
+        val musicOn = !hideAll && expanded && !callActive && mediaSessionAvailable &&
+            (winner == "media" || mediaWithNotification || (pausedSessionCanResume && winner == null))
+        val miniMusic = !hideAll && !expanded && !callActive && winner == "media" && mediaCompactActivityActive()
+        val mapsMini = !hideAll && !expanded && mapsShown()
+        val notificationMini = !hideAll && notificationCompact
+        val compactNotification = if (notificationMini) notificationQueue.values.lastOrNull() else null
+        compactNotification?.let { item ->
+            title.text = item.title.ifBlank { appLabel(item.pkg) }
+            subtitle.text = item.body.ifBlank { appLabel(item.pkg) }
+            icon.setImageDrawable(appIcon(item.pkg))
+            artRow.contentDescription = "${item.title.ifBlank { appLabel(item.pkg) }} notification. Tap to open."
+            artRow.isClickable = true
+        } ?: run {
+            artRow.contentDescription = null
+            artRow.isClickable = false
+        }
         val swOn = stopwatchStart > 0
         val chargeMini = !hideAll && !expanded && !callActive && winner == "charging" && charging && showCharging()
         val replyOn = !hideAll && expanded && !callActive && notifOn && notifLevel >= 2 && replyAction != null &&
@@ -4083,56 +6521,117 @@ class CapsuleService : NotificationListenerService() {
         val actionOn = !hideAll && expanded && !callActive && notifOn && notifLevel >= 2 &&
             notifActions.isNotEmpty() && !lockPrivate
         val callOn = !hideAll && expanded && callActive
-        val chargeOn = !hideAll && expanded && !callActive && winner == "charging" && chargeExpandedShown()
-        val navOn = !hideAll && expanded && !callActive && winner == "navigation" && mapsShown()
+        val chargeOn = !hideAll && expanded && !callActive && chargeExpandedShown() &&
+            (winner == "charging" || chargeWithNotification)
+        val navOn = !hideAll && expanded && !callActive &&
+            (mapsShown() || (navigationWithNotification && winner == "notifications"))
         val notifStackOn = !hideAll && expanded && !callActive && notifOn && (replyOn || actionOn)
-        val queueNavOn = !hideAll && expanded && notifOn && notificationQueue.size > 1 && !lockPrivate
-        setMusicLayout(musicOn || notifStackOn || callOn)
+        val queueNavOn = false
+        val queueStackOn = false
+        val mapsCardLayout = mapsUsesDirectionCard()
+        val mediaCardLayout = prefs.getBoolean("mediaReferenceLayout", true)
+        val tasksPreviewOn = expanded && pillIsIdleForTasks() && !pausedSessionCanResume && !hideAll && !lockPrivate
+        setMusicLayout((musicOn && mediaCardLayout) || notifStackOn || callOn ||
+            (chargeOn && chargeWithNotification) || navigationWithNotification || tasksPreviewOn || queueStackOn)
         qsGrid.visibility = vis(qsOn)
         widgetImage.visibility = vis(widgetOn)
         if (qsOn) refreshQsStates()
 
-        artRow.visibility = vis(!hideAll && (expanded || miniMusic) && !lockPrivate)
-        icon.visibility = vis(!hideAll && (expanded || miniMusic) && !chargeOn && !navOn && !lockPrivate)
-        textCol.visibility = vis(!hideAll && expanded && !chargeOn && !navOn && !lockPrivate)
-        val artSize = if (callOn || musicOn) dp(56) else dp(40)
+        artRow.visibility = vis(!hideAll && (expanded || miniMusic || notificationMini) && !lockPrivate)
+        val collapsedIndicator = collapsedMediaIndicator()
+        updateAlbumArtPulse(miniMusic && !lockPrivate && collapsedIndicator == "art_pulse" && mediaPlaying)
+        miniMediaWaveform.visibility = vis(miniMusic && !lockPrivate && collapsedIndicator == "waveform")
+        barsRow.visibility = vis(!hideAll && (musicOn || (miniMusic && collapsedIndicator == "visualizer")) &&
+            (micRunning || ambientRunning))
+        (textCol.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
+            params.weight = if (miniMusic) 2.2f else 1f
+            textCol.layoutParams = params
+        }
+        (miniVizSpacer.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
+            params.weight = if (miniMusic) 0.65f else 1f
+            miniVizSpacer.layoutParams = params
+        }
+        miniVizSpacer.visibility = vis(miniMusic && (miniMediaWaveform.visibility == View.VISIBLE || barsRow.visibility == View.VISIBLE))
+        navBox.visibility = vis(navOn && !lockPrivate && mapsCardLayout)
+        icon.visibility = vis(!hideAll && (expanded || miniMusic || notificationMini) && !chargeOn && (!navOn || !mapsCardLayout) && !lockPrivate)
+        textCol.visibility = vis(!hideAll && (expanded || miniMusic || notificationMini) && !chargeOn &&
+            (!navOn || !mapsCardLayout) && !lockPrivate)
+        val textColParams = textCol.layoutParams as? LinearLayout.LayoutParams
+        textColParams?.let {
+            it.marginEnd = dp(if (notificationMini) 30 else 6)
+            textCol.layoutParams = it
+        }
+        val sectionForContent = activePillSizingSection()
+        val sectionIconScale = (prefs.getInt("sectionIconScale_$sectionForContent", 100).coerceIn(70, 160) / 100f)
+        val sectionTextScale = (prefs.getInt("sectionTextScale_$sectionForContent", 100).coerceIn(80, 160) / 100f)
+        val artBaseSize = if (callOn || musicOn) dp(56) else if (notificationMini) dp(34) else dp(40)
+        val artLimit = if (miniMusic || notificationMini) (collapsedTargetHeight() - dp(4)).coerceAtLeast(dp(24)) else dp(80)
+        val artSize = (artBaseSize * sectionIconScale).toInt().coerceIn(dp(24), dp(80)).coerceAtMost(artLimit)
         (icon.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
             params.width = artSize
             params.height = artSize
             icon.layoutParams = params
         }
         icon.background = GradientDrawable().apply {
-            shape = if (callOn || musicOn || miniMusic) GradientDrawable.OVAL else GradientDrawable.RECTANGLE
-            cornerRadius = dp(pillStyle().artworkCornerDp).toFloat()
+            shape = if (miniMusic || (!expanded && notificationMini)) GradientDrawable.OVAL
+                else if (callOn || musicOn || notificationMini) GradientDrawable.OVAL else GradientDrawable.RECTANGLE
+            cornerRadius = if (miniMusic || (!expanded && notificationMini)) artSize / 2f
+                else dp(pillStyle().artworkCornerDp).toFloat()
             setColor(Color.TRANSPARENT)
         }
-        val textScale = prefs.getInt("textScale", 100) / 100f
-        title.textSize = (if (callOn) 18f else if (musicOn) 16f else 14f) * textScale
-        subtitle.textSize = (if (callOn || musicOn) 13f else 12f) * textScale
-        if (callOn || musicOn) {
+        icon.clipToOutline = true
+        icon.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+        val textScale = (prefs.getInt("textScale", 100) / 100f) * sectionTextScale
+        title.textSize = (if (callOn) 18f else if (musicOn) 16f else if (notificationMini) 13f else 14f) * textScale
+        subtitle.textSize = (if (callOn || musicOn) 13f else if (notificationMini) 11f else 12f) * textScale
+        title.maxLines = if (miniMusic) 1 else 2
+        title.ellipsize = TextUtils.TruncateAt.END
+        if (notificationMini || miniMusic) subtitle.maxLines = 1
+        else if (notifOn) subtitle.maxLines = subtitle.maxLines.coerceIn(1, 3)
+        else subtitle.maxLines = Int.MAX_VALUE
+        subtitle.ellipsize = if (notificationMini || miniMusic || notifOn) TextUtils.TruncateAt.END else null
+        if (callOn || musicOn || notificationMini) {
             title.setTextColor(pillStyle().primary)
             subtitle.setTextColor(pillStyle().secondary)
         }
         chargeBox.visibility = vis(chargeOn)
-        navBox.visibility = vis(navOn && !lockPrivate)
         if (chargeOn) updateChargeBox()
         if (navOn) updateNavBox()
-        barsRow.visibility = vis(!hideAll && (musicOn || miniMusic) && (micRunning || ambientRunning))
-        miniVizSpacer.visibility = vis(miniMusic && (micRunning || ambientRunning))
         ctrlRow.visibility = vis(musicOn && !lockPrivate)
         timeRow.visibility = vis(musicOn && !lockPrivate)
-        mediaNotificationCard.visibility = vis(mediaWithNotification && !lockPrivate)
-        if (mediaWithNotification) renderMediaNotificationCard()
+        val hasMediaDuration = (controller?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L) > 0L
+        mediaWaveProgress.visibility = vis(musicOn && !lockPrivate && hasMediaDuration)
+        mediaNotificationCard.visibility = View.GONE
+        notificationQueueStack.visibility = View.GONE
+        taskPreviewPanel.visibility = vis(tasksPreviewOn)
+        if (tasksPreviewOn) renderTaskPreview()
         btnPrev.visibility = vis(musicOn && !lockPrivate)
         btnBack10.visibility = vis(musicOn && !lockPrivate)
         btnPlay.visibility = vis(musicOn && !lockPrivate)
+        miniPlayButton.visibility = vis(miniMusic && !lockPrivate)
+        val miniControlSize = (dp(34) * sectionIconScale).toInt().coerceIn(dp(28), dp(44))
+            .coerceAtMost((collapsedTargetHeight() - dp(4)).coerceAtLeast(dp(28)))
+        (miniPlayButton.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
+            params.width = miniControlSize
+            params.height = miniControlSize
+            miniPlayButton.layoutParams = params
+        }
         btnForward10.visibility = vis(musicOn && !lockPrivate)
         btnNext.visibility = vis(musicOn && !lockPrivate)
         callControlsRow.visibility = vis(callOn && !lockPrivate &&
             (callAnswer != null && callState == 1 || callHangup != null))
 
-        val mapsMini = !hideAll && !expanded && mapsShown()
         miniChargeRing.visibility = vis(chargeMini)
+        val chargeIconScale = (prefs.getInt("sectionIconScale_charging", 100).coerceIn(70, 160) / 100f)
+        val collapsedHeightDp = (collapsedTargetHeight() / resources.displayMetrics.density).toInt()
+        val miniRingMaxDp = (collapsedHeightDp - 4).coerceAtLeast(24)
+        val miniRingSize = ((prefs.getInt("chargeRingSize", 48).coerceIn(36, 80) * 0.72f) * chargeIconScale)
+            .toInt().coerceIn(24, 52).coerceAtMost(miniRingMaxDp)
+        (miniChargeRing.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
+            params.width = dp(miniRingSize)
+            params.height = dp(miniRingSize)
+            miniChargeRing.layoutParams = params
+        }
         miniText.visibility = vis(!hideAll && (!expanded && (callActive || swOn || chargeMini || mapsMini) || lockPrivate))
         miniText.text = when {
             lockPrivate -> if (notificationQueue.isNotEmpty()) "${notificationQueue.size}+" else "Capsule"
@@ -4142,7 +6641,7 @@ class CapsuleService : NotificationListenerService() {
             chargeMini -> ""
             else -> "\u26A1"   // the percentage is shown on the right of the camera hole
         }
-        val k = prefs.getInt("textScale", 100) / 100f
+        val k = (prefs.getInt("textScale", 100) / 100f) * sectionTextScale
         miniText.textSize = if (mapsMini) 15f * k else 13f * k
         miniText.setTextColor(if (lockPrivate) pillStyle().primary else if (!callActive && !swOn && !mapsMini && lastTempC >= 42.0) 0xFFFF9F0A.toInt() else Color.WHITE)
         val chargeSplit = chargeMini && !swOn && !mapsMini
@@ -4158,16 +6657,49 @@ class CapsuleService : NotificationListenerService() {
             val eta = MapsNav.eta.trim()
             val distanceLeft = MapsNav.distanceLeft.trim()
             // Show both remaining time and full-trip distance in the collapsed pill.
-            miniRight.text = listOf(
+            val mapRightLabel = listOf(
                 eta,
                 distanceLeft.takeIf { it.isNotEmpty() }?.let { "$it left" }
             ).filter { !it.isNullOrBlank() }.joinToString(" · ")
                 .ifEmpty { MapsNav.arrival.ifEmpty { MapsNav.turnDistance } }
             miniRight.textSize = 12f * k
-            miniRight.setTextColor(0xFF30D158.toInt())
+            val trafficTint = mapsTrafficTint()
+            val coloredEta = eta.ifEmpty { MapsNav.arrival.trim() }
+            miniRight.text = if (trafficTint != null && coloredEta.isNotEmpty() && mapRightLabel.startsWith(coloredEta)) {
+                android.text.SpannableString(mapRightLabel).apply {
+                    setSpan(android.text.style.ForegroundColorSpan(trafficTint), 0, coloredEta.length,
+                        android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            } else mapRightLabel
+            miniRight.setTextColor(pillStyle().primary)
         } else {
-            miniRight.text = "$chargePct%"
-            miniRight.textSize = prefs.getInt("chargePctTextSize", 13).coerceIn(10, 24).toFloat()
+            val percentText = "$chargePct%"
+            val wattsText = chargeWatts?.takeIf { it.isFinite() && it > 0.05 }
+                ?.let { String.format(java.util.Locale.getDefault(), "%.1f W", it) } ?: "— W"
+            val percentSize = prefs.getInt("chargePctTextSize", 13).coerceIn(10, 24)
+            when (prefs.getString("chargeMiniReadout", "percent") ?: "percent") {
+                "watts" -> {
+                    miniRight.text = wattsText
+                    miniRight.textSize = 12f
+                    miniRight.contentDescription = if (wattsText == "— W") "Charging power unavailable" else "Charging power $wattsText"
+                }
+                "both" -> {
+                    val label = "$percentText · $wattsText"
+                    miniRight.textSize = 12f
+                    miniRight.text = android.text.SpannableString(label).apply {
+                        setSpan(android.text.style.AbsoluteSizeSpan(percentSize, true), 0, percentText.length,
+                            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        setSpan(android.text.style.AbsoluteSizeSpan(10, true), percentText.length, label.length,
+                            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                    miniRight.contentDescription = "Battery $chargePct percent, charging power $wattsText"
+                }
+                else -> {
+                    miniRight.text = percentText
+                    miniRight.textSize = percentSize.toFloat()
+                    miniRight.contentDescription = "Battery $chargePct percent"
+                }
+            }
             miniRight.setTextColor(if (lastTempC >= 42.0) 0xFFFF9F0A.toInt() else Color.WHITE)
         }
         val arrowBmp = mapsArrow()
@@ -4179,22 +6711,27 @@ class CapsuleService : NotificationListenerService() {
         }
 
         chips.forEach { it.visibility = vis(replyOn) }
+        notificationActionsScroll.visibility = vis(replyOn || actionOn || queueNavOn)
         replyRow.visibility = vis(replyOn || actionOn || queueNavOn)
         actionBtns.forEachIndexed { i, b ->
             b.text = notifActions.getOrNull(i)?.title?.toString() ?: ""
             b.visibility = vis(actionOn && i < notifActions.size)
         }
         val currentNotificationIndex = notificationQueue.values.indexOfFirst { it.key == notifKey }
-        notificationPosition.text = if (notificationOverflow > 0) {
-            "${currentNotificationIndex + 1} / ${notificationQueue.size} · ${notificationOverflow}+ older"
-        } else "${currentNotificationIndex + 1} / ${notificationQueue.size}"
-        notificationPrevious.visibility = vis(queueNavOn && currentNotificationIndex > 0)
-        notificationPosition.visibility = vis(queueNavOn)
-        notificationNext.visibility = vis(queueNavOn && currentNotificationIndex in 0 until notificationQueue.size - 1)
+        notificationPosition.text = "Latest notification"
+        notificationPrevious.visibility = View.GONE
+        notificationPosition.visibility = View.GONE
+        notificationNext.visibility = View.GONE
         btnAnswer.visibility = vis(callOn && !lockPrivate && callAnswer != null && callState == 1)
         btnDecline.visibility = vis(callOn && !lockPrivate && callHangup != null)
+        callDeclineLabel.text = if (callState == 1) "Decline" else "End call"
+        callDeclineLabel.setTextColor(pillStyle().secondary)
+        callAnswerLabel.setTextColor(pillStyle().secondary)
+        callDeclineGroup.visibility = vis(callOn && !lockPrivate && callHangup != null)
+        callAnswerGroup.visibility = vis(callOn && !lockPrivate && callAnswer != null && callState == 1)
         refreshNotificationBadge()
         if (contentChanged) staggerIn()
+        root?.post { avoidNotificationBadgeOverlap() }
     }
 
     // Vertical stack for music (art, controls, seek bar), horizontal row for everything else
@@ -4313,7 +6850,10 @@ class CapsuleService : NotificationListenerService() {
 
     // Moves the seek bar, and the elapsed and remaining times, while music plays
     private fun updateProgress() {
-        if (showingNotif || callActive) return
+        if (showingNotif || callActive) {
+            if (::mediaWaveProgress.isInitialized) mediaWaveProgress.visibility = View.GONE
+            return
+        }
         val c = controller ?: return
         val md = c.metadata
         val dur = md?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
@@ -4323,30 +6863,27 @@ class CapsuleService : NotificationListenerService() {
         val artist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
         if (subtitle.text.toString() != artist) subtitle.text = artist
         val trackTitle = md?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Unknown"
-        progress.isEnabled = dur > 0L
         val progressDescription = if (dur > 0L) "Track progress, $trackTitle" else "Track progress unavailable for this track"
-        if (progress.contentDescription?.toString() != progressDescription) {
-            progress.contentDescription = progressDescription
+        if (mediaWaveProgress.contentDescription?.toString() != progressDescription) {
+            mediaWaveProgress.contentDescription = progressDescription
         }
         if (dur > 0) {
             pos = pos.coerceIn(0L, dur)
-            if (progress.isIndeterminate) progress.isIndeterminate = false
             if (!pillSeeking) {
-                val targetProgress = ((pos.toDouble() / dur.toDouble()) * 1000.0)
-                    .toInt().coerceIn(0, 1000)
-                if (progress.progress != targetProgress) progress.progress = targetProgress
+                mediaWaveProgress.progress = ((pos.toFloat() / dur.toFloat()) * mediaWaveProgress.max).toInt().coerceIn(0, mediaWaveProgress.max)
             }
             val elapsed = fmt(pos)
             val remaining = "-" + fmt(dur - pos)
             if (elapsedText.text.toString() != elapsed) elapsedText.text = elapsed
             if (remainText.text.toString() != remaining) remainText.text = remaining
         } else {
-            if (!progress.isIndeterminate) progress.isIndeterminate = true
+            mediaWaveProgress.progress = 0
             val elapsed = fmt(pos)
             if (elapsedText.text.toString() != elapsed) elapsedText.text = elapsed
             if (remainText.text.isNotEmpty()) remainText.text = ""
         }
-        if (progress.visibility != View.VISIBLE) progress.visibility = View.VISIBLE
+        if (mediaWaveProgress.visibility != View.VISIBLE) mediaWaveProgress.visibility = View.VISIBLE
+        progress.visibility = View.GONE
     }
 
     // Adaptive polling keeps live content responsive without doing UI work at a fixed high rate
@@ -4421,15 +6958,20 @@ class CapsuleService : NotificationListenerService() {
         if (callActive) {
             title.text = callTitle
             subtitle.text = if (callState == 2) callTimerText() + " \u00B7 Ongoing call" else callSubtitle
-        } else if (shouldShowMediaWithNotification() || !showingNotif || activityWinner() !in setOf("live", "notifications")) {
+        } else if (shouldShowActivityNotificationCard() || !showingNotif || activityWinner() !in setOf("live", "notifications")) {
             renderMedia()
         }
         applyVisibility()
     }
 
-    // Collapsed navigation text prioritises remaining route distance; next-turn distance is the fallback.
-    // In the collapsed pill, prioritise total trip distance (for example, "12 km") over the short distance to the next maneuver. Fall back to turn distance if Maps has not exposed a trip distance yet.
-    private fun mapsMiniText(): String = MapsNav.distanceLeft.ifEmpty { MapsNav.turnDistance.ifEmpty { MapsNav.eta.ifEmpty { "Maps" } } }
+    // Keep the collapsed left label tied to the upcoming maneuver; the right side already carries
+    // trip ETA and total distance remaining, so repeating total distance here is misleading.
+    private fun mapsMiniText(): String = MapsNav.turnDistance.ifEmpty {
+        MapsNav.distanceLeft.ifEmpty { MapsNav.eta.ifEmpty { "Maps" } }
+    }
+
+    private fun mapsTrafficTint(): Int? =
+        if (prefs.getBoolean("mapsTrafficColors", true)) MapsNav.trafficTint() else null
 
     private fun navArrowRes(dir: String): Int = when (dir) {
         "left" -> R.drawable.ic_nav_left
@@ -4444,6 +6986,19 @@ class CapsuleService : NotificationListenerService() {
     }
 
     private fun updateNavBox() {
+        val textScale = prefs.getInt("sectionTextScale_maps", 100).coerceIn(80, 160) / 100f
+        val iconScale = prefs.getInt("sectionIconScale_maps", 100).coerceIn(70, 160) / 100f
+        navTurn.textSize = 30f * textScale
+        navStreet.textSize = 16f * textScale
+        navEta.textSize = 22f * textScale
+        navArrive.textSize = 14f * textScale
+        navLeft.textSize = 14f * textScale
+        val arrowSize = dp((40 * iconScale).toInt().coerceIn(28, 56))
+        (navArrow.layoutParams as? FrameLayout.LayoutParams)?.let { params ->
+            params.width = arrowSize
+            params.height = arrowSize
+            navArrow.layoutParams = params
+        }
         val bmp = mapsArrow()
         val key = if (bmp != null) "bmp:${MapsNav.arrowVersion}" else "d:${MapsNav.direction}"
         if (key != navArrowKey) {
@@ -4460,6 +7015,7 @@ class CapsuleService : NotificationListenerService() {
         navTurn.text = MapsNav.turnDistance.ifEmpty { MapsNav.distanceLeft.ifEmpty { "\u2014" } }
         navStreet.text = MapsNav.street
         navEta.text = MapsNav.eta.ifEmpty { "\u2014" }
+        navEta.setTextColor(mapsTrafficTint() ?: pillStyle().primary)
         navArrive.text = MapsNav.arrival
         navLeft.text = if (MapsNav.distanceLeft.isEmpty()) "" else "${MapsNav.distanceLeft} left"
     }
@@ -4469,7 +7025,9 @@ class CapsuleService : NotificationListenerService() {
         key: String?, res: Int = 0, tint: Int = Color.WHITE,
         bmp: android.graphics.Bitmap? = null, tintBmp: Boolean = false
     ) {
-        val k = key ?: ""
+        val scale = prefs.getInt("sectionIconScale_${activePillSizingSection()}", 100).coerceIn(70, 160) / 100f
+        val iconSize = if (key == null) 0 else dp((20 * scale).toInt().coerceIn(16, 32))
+        val k = "${key.orEmpty()}:$iconSize"
         if (k == miniArrowKey) return
         miniArrowKey = k
         if (key == null) {
@@ -4481,7 +7039,7 @@ class CapsuleService : NotificationListenerService() {
         } else {
             runCatching { uiCtx.getDrawable(res)?.mutate() }.getOrNull()?.also { it.setTint(tint) }
         }
-        d?.setBounds(0, 0, dp(20), dp(20))
+        d?.setBounds(0, 0, iconSize, iconSize)
         miniText.compoundDrawablePadding = dp(6)
         miniText.setCompoundDrawablesRelative(d, null, null, null)
     }
@@ -4524,36 +7082,43 @@ class CapsuleService : NotificationListenerService() {
     private fun feedMaps(n: Notification): Boolean {
         val texts = mutableListOf<String>()
         var arrow: Bitmap? = null
+        var trafficLevel: String? = null
         val ex = n.extras
         for (k in listOf(
             Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_SUB_TEXT,
             Notification.EXTRA_BIG_TEXT, Notification.EXTRA_INFO_TEXT
         )) {
-            ex.getCharSequence(k)?.toString()?.takeIf { it.isNotBlank() }?.let { texts.add(it) }
+            ex.getCharSequence(k)?.let { value ->
+                value.toString().takeIf { it.isNotBlank() }?.let { texts.add(it) }
+                if (trafficLevel == null) trafficLevel = MapsNav.trafficLevelFromSpans(value)
+            }
         }
         // A custom notification layout holds the real texts and the arrow picture
         @Suppress("DEPRECATION")
         val views = listOfNotNull(n.bigContentView, n.contentView, n.headsUpContentView)
         for (rv in views) {
             val v = runCatching { rv.apply(this, FrameLayout(this)) }.getOrNull() ?: continue
-            val found = scrapeViews(v, texts)
+            val found = scrapeViews(v, texts) { observed -> if (trafficLevel == null) trafficLevel = observed }
             if (arrow == null) arrow = found
         }
         if (arrow == null) {
             arrow = runCatching { n.getLargeIcon()?.loadDrawable(this)?.let { drawableToBitmap(it) } }.getOrNull()
         }
         if (prefs.getBoolean("debugMaps", false)) diag("maps notification: texts=${texts.take(14)}, arrow picture found=${arrow != null}")
-        MapsNav.updateFromNotification(texts, arrow)
+        MapsNav.updateFromNotification(texts, arrow, trafficLevel)
         return MapsNav.active
     }
 
     // Collects the texts and the first real picture of a notification layout. Android's own icons
     // (the small app icon, the expand button) are skipped.
-    private fun scrapeViews(root: View, texts: MutableList<String>): Bitmap? {
+    private fun scrapeViews(root: View, texts: MutableList<String>, onTrafficLevel: (String) -> Unit): Bitmap? {
         var found: Bitmap? = null
         fun walk(v: View, depth: Int) {
             if (depth > 25) return
-            if (v is TextView) v.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { texts.add(it) }
+            if (v is TextView) v.text?.let { value ->
+                value.toString().trim().takeIf { it.isNotEmpty() }?.let { texts.add(it) }
+                if (MapsNav.isDurationText(value)) MapsNav.trafficLevelFromColor(v.currentTextColor)?.let(onTrafficLevel)
+            }
             if (v is ImageView) {
                 v.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { texts.add(it) }
                 val systemIcon = v.id != View.NO_ID &&
@@ -4619,24 +7184,34 @@ class CapsuleService : NotificationListenerService() {
                 "oneui" -> if (playing) R.drawable.ic_oneui_pause else R.drawable.ic_oneui_play
                 else -> if (playing) R.drawable.ic_pause else R.drawable.ic_play
             }
-            btnPlay.setImageResource(
-                playPauseIcon
-            )
+            btnPlay.setImageResource(playPauseIcon)
+            miniPlayButton.setImageResource(playPauseIcon)
             val playDescription = if (playing) "Pause playback" else "Resume playback"
             if (btnPlay.contentDescription?.toString() != playDescription) {
                 btnPlay.contentDescription = playDescription
+            }
+            if (miniPlayButton.contentDescription?.toString() != playDescription) {
+                miniPlayButton.contentDescription = playDescription
             }
         }
     }
 
     private fun pickController(list: List<MediaController>?) {
+        val previousToken = controller?.sessionToken
         controller?.unregisterCallback(controllerCallback)
         val next = if (!showMusic()) null else (
             list?.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
                 ?: list?.firstOrNull()
             )
+        if (previousToken != next?.sessionToken) {
+            lastMediaPlayingAtElapsed = 0L
+            mediaWasPlaying = false
+            mediaCompactGraceUntilElapsed = 0L
+            handler.removeCallbacks(mediaCompactGraceExpiry)
+        }
         controller = next
         next?.registerCallback(controllerCallback)
+        updateMediaPauseGrace(next?.playbackState)
         refreshMedia()
         if (next == null && !showingNotif && !callActive) setExpanded(false)
     }
@@ -4896,6 +7471,7 @@ class CapsuleService : NotificationListenerService() {
                 // Navigation ended: forget the notification's data and the arrow picture
                 MapsNav.notifAlive = false
                 MapsNav.active = false
+                MapsNav.trafficLevel = ""
                 MapsNav.arrow = null
                 MapsNav.arrowVersion++
             }
@@ -4903,7 +7479,7 @@ class CapsuleService : NotificationListenerService() {
         uiPost {
             val timeout = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
                 reason == NotificationListenerService.REASON_TIMEOUT
-            val mediaHadNotificationCard = shouldShowMediaWithNotification()
+            val mediaHadNotificationCard = shouldShowActivityNotificationCard()
             if (!timeout) removeQueuedNotification(sbn.key)
             reconcileCall()
             val removedLiveActivity = sbn.key == downloadKey || sbn.key == liveChronometerKey
@@ -5259,6 +7835,7 @@ class CapsuleService : NotificationListenerService() {
         val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
         val status = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
         val plugged = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+        chargePlugged = plugged
         val voltageMv = i.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0)
         val tempC = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10.0
         lastTempC = tempC

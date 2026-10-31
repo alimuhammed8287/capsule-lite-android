@@ -13,14 +13,19 @@ val hasStableDebugSigning = listOf(
 
 android {
     namespace = "com.example.capsule"
-    compileSdk = 34
+    compileSdk = 36
+
+    buildFeatures {
+        buildConfig = true
+    }
 
     defaultConfig {
         applicationId = "com.example.capsulelite"
         minSdk = 24
         targetSdk = 34
-        versionCode = 50
-        versionName = "1.4.2"
+        versionCode = 69
+        versionName = "1.4.21"
+        buildConfigField("String", "BUILD_ID", "\"${System.getenv("GITHUB_RUN_NUMBER") ?: "local"}\"")
     }
 
     signingConfigs {
@@ -55,6 +60,7 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("com.google.zxing:core:3.5.3")

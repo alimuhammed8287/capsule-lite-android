@@ -1,7 +1,10 @@
 package com.example.capsule
 
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.SystemClock
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 
 // Navigation details from Google Maps, only when the user has turned navigation info on.
 // Two sources feed it: the text on the Maps screen (read by the accessibility service, only while Maps is open)
@@ -15,6 +18,7 @@ object MapsNav {
     @Volatile var turnDistance = ""   // e.g. "50 m"
     @Volatile var street = ""         // e.g. "Channasandra Main Rd"
     @Volatile var direction = ""      // left, right, slight_left, slight_right, straight, uturn, roundabout, arrive, or "" when unknown
+    @Volatile var trafficLevel = ""    // clear, moderate, heavy; only set when Maps exposes a colored ETA
     @Volatile var maneuverSeq = 0     // goes up by one when a new turn starts (never for distance ticks)
     @Volatile var rawDump = ""        // the first texts read, for the debug line
     @Volatile var lastSeen = 0L
@@ -31,10 +35,11 @@ object MapsNav {
 
     private val spaceRe = Regex("""[\u00A0\u2007\u2009\u202F]""")
     private val sepRe = Regex("""\s*[•·|\n]\s*""")
-    private val etaRe = Regex("""\d+\s?(hr|h|min|mins)(\s\d+\s?min)?""", RegexOption.IGNORE_CASE)
+    private val etaRe = Regex("""\d+\s?(hr|hrs|h|min|mins|minute|minutes)(\s\d+\s?min)?(\s+(left|remaining))?""", RegexOption.IGNORE_CASE)
     private val leftRe = Regex("""(\d+(\.\d+)?\s?(km|m|mi))\s*[•·]\s*(\d{1,2}:\d{2}\s?[ap]m)""", RegexOption.IGNORE_CASE)
     private val turnRe = Regex("""\d+(\.\d+)?\s?(km|m|mi|ft|yd)""", RegexOption.IGNORE_CASE)
     private val clockRe = Regex("""\d{1,2}:\d{2}\s?[ap]m""", RegexOption.IGNORE_CASE)
+    private val durationInTextRe = Regex("""\b\d+\s*(?:hr|hrs|hour|hours|h|min|mins|minute|minutes)\b""", RegexOption.IGNORE_CASE)
     private val onToRe = Regex("""^.*?\b(onto|on|towards|toward|to)\s+""", RegexOption.IGNORE_CASE)
     private val metersRe = Regex("""(\d+(?:[.,]\d+)?)\s?(km|mi|yd|ft|m)\b""", RegexOption.IGNORE_CASE)
     private val ignore = setOf("Re-centre", "Report", "Search", "Start", "Done", "Overview")
@@ -50,6 +55,42 @@ object MapsNav {
     private val straightRe = Regex("""straight|continue (on|onto|along)|\bhead\b""", RegexOption.IGNORE_CASE)
 
     private fun norm(s: String) = s.replace(spaceRe, " ").trim()
+
+    fun isDurationText(text: CharSequence): Boolean = durationInTextRe.containsMatchIn(norm(text.toString()))
+
+    /** Read Maps' existing ETA tint when its notification exposes it; neutral text stays unclassified. */
+    fun trafficLevelFromColor(color: Int): String? {
+        val hsv = FloatArray(3)
+        Color.colorToHSV(color, hsv)
+        val hue = hsv[0]
+        val saturation = hsv[1]
+        val value = hsv[2]
+        if (saturation < 0.30f || value < 0.28f) return null
+        return when {
+            hue in 76f..170f -> "clear"
+            hue in 18f..75f -> "moderate"
+            hue <= 17f || hue >= 345f -> "heavy"
+            else -> null
+        }
+    }
+
+    fun trafficLevelFromSpans(text: CharSequence): String? {
+        if (!isDurationText(text) || text !is Spanned) return null
+        val match = durationInTextRe.find(text) ?: return null
+        val spans = text.getSpans(0, text.length, ForegroundColorSpan::class.java)
+        return spans.firstNotNullOfOrNull { span ->
+            val start = text.getSpanStart(span)
+            val end = text.getSpanEnd(span)
+            if (start < match.range.last + 1 && end > match.range.first) trafficLevelFromColor(span.foregroundColor) else null
+        }
+    }
+
+    fun trafficTint(): Int? = when (trafficLevel) {
+        "clear" -> 0xFF30D158.toInt()
+        "moderate" -> 0xFFFFB547.toInt()
+        "heavy" -> 0xFFFF5A52.toInt()
+        else -> null
+    }
 
     // "280 m" -> 280, "1.2 km" -> 1200, "0.5 mi" -> 804. -1 when there is no distance.
     fun metersOf(s: String): Int {
@@ -150,15 +191,25 @@ object MapsNav {
     }
 
     // From Maps' navigation notification. The screen text, when it is fresh, is more up to date, so it wins.
-    fun updateFromNotification(texts: List<String>, arrowBmp: Bitmap?) {
+    fun updateFromNotification(texts: List<String>, arrowBmp: Bitmap?, observedTrafficLevel: String? = null) {
         notifAlive = true
         if (arrowBmp != null) storeArrow(arrowBmp)
+        if (observedTrafficLevel != null) trafficLevel = observedTrafficLevel
         val items = texts.flatMap { listOf(it) + it.split(sepRe) }.map { norm(it) }.filter { it.isNotEmpty() }.distinct()
         if (SystemClock.uptimeMillis() - accessAt < 3000) {
             noteDirection(items)
+            // Maps only posts this ongoing/category-navigation notification while a route is
+            // active. Keep navigation eligible for priority selection even when its current
+            // custom notification exposes no readable ETA or distance text.
+            active = true
+            lastSeen = SystemClock.uptimeMillis()
             return
         }
         parse(items, "notification")
+        // The notification lifecycle is a stronger signal of active navigation than whether
+        // this Maps version exposed parsable text in its custom RemoteViews.
+        active = true
+        lastSeen = SystemClock.uptimeMillis()
     }
 
     private fun parse(items: List<String>, source: String) {
