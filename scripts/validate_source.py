@@ -173,7 +173,14 @@ checks = {
     "expanded, collapsed, and companion Circular Wave rings share one phase": service.count("{ chargeWavePhase() }") >= 3 and
         "private fun chargeWavePhase(): Float" in service and "sharedWavePhase?.invoke()?.coerceIn(0f, 1f) ?: phase" in service,
     "notification companion dismisses its displayed queue item": "dismissMediaNotification(notificationBubbleKey)" in service and "private fun dismissMediaNotification(key: String? = null)" in service and "notificationQueue[key]" in service,
-    "Maps, charging, and notifications can occupy three separate pills": "hasPersistentNotificationHost" in activity_model and "notificationsStayInTheirOwnPillWhenMapsAndChargingAreActive" in (ROOT / "app/src/test/java/com/example/capsule/CapsuleActivitySchedulerTest.kt").read_text(encoding="utf-8"),
+    "Maps, charging, and notifications can occupy three separate pills": all(token in activity_model for token in (
+        "private val notificationHosts = setOf(",
+        "CapsuleActivityKind.MEDIA, CapsuleActivityKind.NAVIGATION, CapsuleActivityKind.CHARGING",
+        "val hasPersistentNotificationHost = ordered.any",
+        "in notificationHosts && it in active",
+        "NotificationPlacement.COMPANION",
+        "CapsuleActivityKind.NOTIFICATION -> ordered.firstOrNull",
+    )),
     "companion pill motion follows the selected animation style in both directions": "private fun companionMotionProfile(expanding: Boolean)" in service and
         "companionMotionProfile(activityBubbleMotionExpanding)" in service and "companionMotionProfile(notificationBubbleMotionExpanding)" in service and
         "companionMotionExpansionOverride = !e" in service and "activityBubbleMotionExpanding = companionMotionExpansionOverride ?: desired" in service and
